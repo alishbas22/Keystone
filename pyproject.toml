@@ -16,6 +16,9 @@ dependencies = [
     "uvicorn[standard]>=0.32",
     "rdflib>=7.6,<8",
     "pyyaml>=6.0",
+    "docling>=2.152,<3",
+    "streamlit>=1.40",
+    "truststore>=0.10",
 ]
 
 [dependency-groups]
@@ -26,6 +29,7 @@ dev = [
     "ruff>=0.8",
     "mypy>=1.13",
     "types-pyyaml>=6.0.12.20261122",
+    "fpdf2>=2.8",
 ]
 
 [build-system]
@@ -52,4 +56,5 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+markers = ["slow: needs Docling's PDF models (downloaded on first use)"]
 filterwarnings = ["ignore::pydantic.PydanticDeprecatedSince20:graphiti_core.*"]
