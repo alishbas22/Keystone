@@ -49,6 +49,24 @@ def test_explorer_shows_profile_and_respects_view_as(monkeypatch: pytest.MonkeyP
         }
 
 
+def test_conflict_review_and_decision(monkeypatch: pytest.MonkeyPatch) -> None:
+    with seeded_ui(monkeypatch):
+        app = run_page("conflicts.py")
+        no_errors(app)
+        assert [m.value for m in app.metric] == ["1", "0", "0"]
+        conflict = app.expander[0]
+        assert "decided by time" in conflict.label
+        # A reviewer overrides the time rule: keep the older claim (A = Sara, from 2025).
+        app.text_input(key="reviewer").set_value("Alishba").run()
+        keep_a = next(b for b in app.button if b.label == "Keep A")
+        keep_a.click().run()
+        no_errors(app)
+        assert [m.value for m in app.metric] == ["1", "0", "1"]
+        assert "decided by person" in app.expander[0].label
+        next(b for b in app.button if b.label.startswith("Undo")).click().run()
+        assert "decided by time" in app.expander[0].label
+
+
 def test_home_page_loads(monkeypatch: pytest.MonkeyPatch) -> None:
     with seeded_ui(monkeypatch):
         app = run_page("home.py")
