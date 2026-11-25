@@ -1,0 +1,44 @@
+# Relation rules (KAN-16)
+#
+# These rules tell the truth engine when two claims contradict each other.
+#
+#   opposites     Two relations that cannot both be true for the same pair at the same time.
+#                 "Me likes Fatima" contradicts "Me dislikes Fatima".
+#
+#   single_valued A relation that can have only ONE current value.
+#                 per: source  -> each source has one target  (a person has one manager)
+#                 per: target  -> each target has one source  (a customer has one account manager)
+#                 Two claims naming different values at the same time contradict each other.
+#
+# How a contradiction is RESOLVED (newer claim, source authority, corroboration) is decided by
+# the truth engine, not here.
+
+rules:
+  opposites:
+    - [likes, dislikes]
+
+  single_valued:
+    - relation: reports_to
+      per: source
+      description: A person has one current direct manager.
+    - relation: manages_account
+      per: target
+      description: A customer has one current account manager.
+    - relation: placed_by
+      per: source
+      description: An order is placed by exactly one buyer.
+    - relation: sold_by
+      per: source
+      description: An order is sold by exactly one seller.
+    - relation: billed_to
+      per: source
+      description: An invoice is addressed to exactly one payer.
+    - relation: issued_by
+      per: source
+      description: An invoice is issued by exactly one organisation.
+    - relation: unit_of
+      per: source
+      description: A team or department belongs to one parent at a time.
+    - relation: subsidiary_of
+      per: source
+      description: An organisation has one direct parent organisation at a time.

@@ -17,7 +17,8 @@
 #   - Names are for humans: PascalCase for types, snake_case for relations and properties.
 #   - Descriptions are written for the LLM that extracts entities from documents.
 #
-# Industry packs (ontology/packs/) extend this file; they never modify it.
+# Shared interfaces (Party, Transactable) are in interfaces.yaml; contradiction rules in
+# rules.yaml. Industry packs (ontology/packs/) extend these files; they never modify them.
 
 name: keystone-core
 version: 0.1.0
@@ -50,6 +51,7 @@ entity_types:
       An individual human being, such as an employee, a customer contact, a supplier contact
       or a manager. Not a company, team or job title.
     maps_to: schema:Person
+    implements: [Party]
     see_also: [prov:Person]
     properties:
       email: {type: email, maps_to: schema:email, identity: true, description: 'Work or personal email address.'}
@@ -61,6 +63,7 @@ entity_types:
       as our own company, a customer company, a supplier or a bank. For teams and departments
       inside an organisation use OrganizationalUnit.
     maps_to: schema:Organization
+    implements: [Party]
     see_also: [org:Organization, prov:Organization]
     properties:
       legal_name: {type: string, maps_to: schema:legalName, description: 'Official registered name.'}
@@ -90,6 +93,7 @@ entity_types:
       A confirmed request by a customer to buy products or services, usually with an order
       number and date, such as purchase order "PO-1042".
     maps_to: schema:Order
+    implements: [Transactable]
     properties:
       order_number: {type: string, maps_to: schema:orderNumber, identity: true, description: 'Order or purchase order number.'}
       order_date: {type: date, maps_to: schema:orderDate, description: 'Date the order was placed.'}
@@ -100,6 +104,7 @@ entity_types:
     description: >-
       A bill requesting payment for goods or services, such as invoice "INV-2025-001".
     maps_to: schema:Invoice
+    implements: [Transactable]
     properties:
       invoice_number: {type: string, maps_to: schema:identifier, identity: true, description: 'Invoice number.'}
       issue_date: {type: date, description: 'Date the invoice was issued.'}
@@ -190,19 +195,19 @@ relation_types:
   # --- Commercial relationships (Keystone terms, no exact standard equivalent) ---
   customer_of:
     description: A person or organisation is a customer of (buys from) an organisation.
-    source: [Person, Organization]
+    source: [Party]
     target: [Organization]
 
   manages_account:
     description: A person is the account manager or main contact responsible for a customer.
     source: [Person]
-    target: [Person, Organization]
+    target: [Party]
 
   # --- Orders, invoices and products (Schema.org) ---
   placed_by:
     description: An order was placed by a person or organisation (the buyer).
     source: [Order]
-    target: [Person, Organization]
+    target: [Party]
     maps_to: schema:customer
 
   sold_by:
@@ -228,7 +233,7 @@ relation_types:
   billed_to:
     description: An invoice is addressed to the person or organisation who must pay it.
     source: [Invoice]
-    target: [Person, Organization]
+    target: [Party]
     maps_to: schema:customer
 
   issued_by:
@@ -260,19 +265,19 @@ relation_types:
   written_by:
     description: A document was written or authored by a person or organisation.
     source: [Document]
-    target: [Person, Organization]
+    target: [Party]
     maps_to: schema:author
 
   # --- Sentiment (used for the contradiction example: likes vs dislikes) ---
   likes:
     description: A person or organisation has a positive view of, or good relationship with, someone or something.
-    source: [Person, Organization]
-    target: [Person, Organization, Product]
+    source: [Party]
+    target: [Party, Product]
 
   dislikes:
     description: A person or organisation has a negative view of, or bad relationship with, someone or something.
-    source: [Person, Organization]
-    target: [Person, Organization, Product]
+    source: [Party]
+    target: [Party, Product]
 
 # ---------------------------------------------------------------------------------------------
 # Provenance: metadata stored on EVERY claim (PROV-O). "Every fact has a source."

@@ -2,11 +2,10 @@ import copy
 from typing import Any
 
 import pytest
-import yaml
 from pydantic import ValidationError
 from rdflib import Graph
 
-from keystone.ontology.loader import core_ontology, ontology_dir
+from keystone.ontology.loader import core_ontology, load_raw
 from keystone.ontology.models import Ontology
 from keystone.ontology.standards import check_mappings, load_standards
 
@@ -23,9 +22,8 @@ def standards(core: Ontology) -> Graph:
 
 @pytest.fixture
 def raw() -> dict[str, Any]:
-    """The core ontology as plain data, for building broken variants."""
-    with (ontology_dir() / "core.yaml").open(encoding="utf-8") as f:
-        return copy.deepcopy(yaml.safe_load(f))
+    """The merged core ontology as plain data, for building broken variants."""
+    return copy.deepcopy(load_raw())
 
 
 # --- The core ontology itself -----------------------------------------------------------------

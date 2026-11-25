@@ -1,0 +1,24 @@
+# Shared interfaces (KAN-16)
+#
+# An interface is a shared label for entity types that play the same role. Relations can use
+# an interface as an endpoint (e.g. `customer_of: Party -> Organization`), so any type that
+# implements the interface, including types added later by industry packs, can take part
+# without editing the core ontology ("extend, don't modify").
+#
+# A type opts in with `implements: [InterfaceName]` and must then have every property the
+# interface lists, with the same type.
+
+interfaces:
+  Party:
+    description: >-
+      Anyone who can act in business: buy, sell, sign, own, pay or be paid. A person or an
+      organisation.
+    properties: {}
+
+  Transactable:
+    description: >-
+      Something with a monetary value that is exchanged between parties, such as an order
+      or an invoice.
+    properties:
+      total_amount: {type: number, description: 'Total monetary value.'}
+      currency: {type: string, description: 'ISO 4217 currency code, e.g. "USD".'}
