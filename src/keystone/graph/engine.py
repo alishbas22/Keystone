@@ -118,6 +118,8 @@ class StoredDocument:
     business_function: str
     observed_at: datetime
     sections: int
+    url: str | None = None  # where the original can be read again (for re-ingest)
+    author: str | None = None
 
 
 class KeystoneGraph:
@@ -247,6 +249,8 @@ class KeystoneGraph:
                     business_function=first.business_function,
                     observed_at=first.observed_at,
                     sections=len(sections),
+                    url=first.url,
+                    author=first.author,
                 )
             )
         return sorted(documents, key=lambda d: d.observed_at)

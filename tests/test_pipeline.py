@@ -14,6 +14,7 @@ from keystone.connectors.folder import FolderConnector
 from keystone.graph.engine import (
     KeystoneGraph,
     MissingApiKeyError,
+    StoredDocument,
     make_graphiti,
     transient_problem,
 )
@@ -21,6 +22,8 @@ from keystone.graph.provenance import Provenance
 from keystone.ingest.pipeline import (
     ingest_document,
     observed_date,
+    reingest,
+    save_upload,
     source_kind,
     sync_connector,
 )
@@ -212,6 +215,43 @@ async def test_rate_limit_gives_up_after_the_retries() -> None:
     with pytest.raises(RateLimitError):
         await graph.add_section(a_provenance(), "text")
     assert graphiti.calls == 3
+
+
+def test_uploads_are_kept_for_re_ingest(tmp_path: Path) -> None:
+    doc = save_upload(tmp_path / "uploads", "Q3 report?.md", b"# Q3\n\nRevenue grew.")
+    [saved] = list((tmp_path / "uploads").iterdir())
+    assert saved.read_bytes() == b"# Q3\n\nRevenue grew." and saved.name.endswith("Q3_report_.md")
+    assert (doc.source, doc.file_name, doc.url) == ("upload:ui", "Q3 report?.md", saved.as_uri())
+
+
+async def test_reingest_reads_the_original_again(tmp_path: Path) -> None:
+    graph = FakeGraph()
+    deleted: list[str] = []
+
+    async def delete_document(doc_id: str) -> int:
+        deleted.append(doc_id)
+        graph.sections = [s for s in graph.sections if s[0].doc_id != doc_id]
+        return 1
+
+    graph.delete_document = delete_document  # type: ignore[attr-defined]
+    document = save_upload(tmp_path, "plan.md", b"# Plan\n\nSara manages Harbor.")
+    await ingest_document(graph, document, "Sales")  # type: ignore[arg-type]
+    stored = StoredDocument(
+        doc_id=document.content_hash, title="Plan", file="plan.md", source="upload:ui",
+        business_function="Sales", observed_at=datetime.now(UTC), sections=1, url=document.url,
+    )  # fmt: skip
+    result = await reingest(graph, stored)  # type: ignore[arg-type]
+    assert (result.status, deleted) == ("ingested", [document.content_hash])
+    assert [p.business_function for p, _ in graph.sections] == ["Sales"]
+
+
+async def test_reingest_without_the_original_file() -> None:
+    stored = StoredDocument(
+        doc_id="x", title="Gone", file="gone.pdf", source="folder:old", business_function="Sales",
+        observed_at=datetime.now(UTC), sections=1, url="file:///nowhere/gone.pdf",
+    )  # fmt: skip
+    result = await reingest(FakeGraph(), stored)  # type: ignore[arg-type]
+    assert (result.status, result.message) == ("failed", "the original file is not available")
 
 
 def test_provenance_location() -> None:

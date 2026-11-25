@@ -14,8 +14,8 @@ dist/
 .mypy_cache/
 .ruff_cache/
 
-# Local data
-data/neo4j/
+# Local data (uploaded company documents must never be committed). Root only: demo/data is tracked.
+/data/
 *.log
 
 # Editors / OS

@@ -1,6 +1,7 @@
 """Runtime settings, read from environment variables or a local `.env` file."""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import AliasChoices, Field, SecretStr
@@ -41,6 +42,9 @@ class Settings(BaseSettings):
 
     # Business function for documents whose source does not suggest one.
     default_business_function: str = "Operations"
+
+    # Where uploaded files are kept so they can be re-ingested (git-ignored).
+    upload_dir: Path = Path("data/uploads")
 
     @property
     def api_key(self) -> str:

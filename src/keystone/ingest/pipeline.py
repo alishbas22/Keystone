@@ -6,12 +6,16 @@
 Use `ingest_document` for one document and `sync_connector` for a whole source.
 """
 
+import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 from keystone.connectors.base import BaseConnector, Document
-from keystone.graph.engine import KeystoneGraph
+from keystone.graph.engine import KeystoneGraph, StoredDocument
 from keystone.graph.provenance import Provenance
 from keystone.ingest.parse import ParseError, date_from_filename, parse_document
 
@@ -106,6 +110,56 @@ async def ingest_document(
         body = f"Document: {parsed.title}\nSection: {section.heading}\n\n{section.text}"
         await graph.add_section(provenance, body, progress)
     return IngestResult(document.id, parsed.title, "ingested", sections=total)
+
+
+def save_upload(
+    upload_dir: Path, file_name: str, content: bytes, written_at: datetime | None = None
+) -> Document:
+    """Keep a copy of an uploaded file (so it can be re-ingested) and return it as a Document."""
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in Path(file_name).name)
+    digest = hashlib.sha256(content).hexdigest()[:12]
+    path = (upload_dir / f"{digest}_{safe_name}").resolve()
+    path.write_bytes(content)
+    return Document(
+        id=file_name,
+        source="upload:ui",
+        title=Path(file_name).stem.replace("_", " "),
+        file_name=Path(file_name).name,
+        content=content,
+        modified_at=written_at,
+        url=path.as_uri(),
+    )
+
+
+def _local_path(url: str | None) -> Path | None:
+    if not url or not url.startswith("file:"):
+        return None
+    path = Path(url2pathname(urlparse(url).path))
+    return path if path.is_file() else None
+
+
+async def reingest(
+    graph: KeystoneGraph, stored: StoredDocument, progress: Progress | None = None
+) -> IngestResult:
+    """Delete a document's facts and ingest its original file again (e.g. after a fix)."""
+    path = _local_path(stored.url)
+    if path is None:
+        return IngestResult(
+            stored.doc_id, stored.title, "failed", message="the original file is not available"
+        )
+    document = Document(
+        id=stored.file or path.name,
+        source=stored.source,
+        title=stored.title,
+        file_name=stored.file or path.name,
+        content=path.read_bytes(),
+        modified_at=stored.observed_at,
+        author=stored.author,
+        url=stored.url,
+    )
+    await graph.delete_document(stored.doc_id)
+    return await ingest_document(graph, document, stored.business_function, progress)
 
 
 async def sync_connector(
