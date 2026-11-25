@@ -49,12 +49,15 @@ class SyncReport:
 
 
 def observed_date(document: Document, written_at: datetime | None) -> datetime:
-    """When the content was written: the document's own date, else the best available guess."""
+    """When the content was written: the document's own date, else the best available guess.
+
+    A file's modification time is the weakest clue: copying or re-saving a file changes it.
+    """
     for candidate in (
         written_at,  # e.g. an email's sent date
-        document.modified_at,
-        date_from_filename(document.file_name or ""),
+        date_from_filename(document.file_name or ""),  # e.g. 2025-03-10_account_plan.docx
         date_from_filename(document.title),
+        document.modified_at,
     ):
         if candidate is not None:
             return candidate if candidate.tzinfo else candidate.replace(tzinfo=UTC)

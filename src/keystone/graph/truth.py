@@ -59,8 +59,9 @@ class Fact:
     relation: str  # ontology relation name, e.g. "manages_account"
     object: str
     text: str
-    observed_at: datetime | None  # when the fact became true / was recorded
+    observed_at: datetime | None  # when the claim was made (newest source); used by the time rule
     ended_at: datetime | None = None  # set when Graphiti invalidated the fact
+    valid_from: datetime | None = None  # when it became true per the text ("effective 1 Sep")
     sources: tuple[str, ...] = ()  # episode uuids
     evidence: tuple[Evidence, ...] = ()
     status: Status = Status.CURRENT

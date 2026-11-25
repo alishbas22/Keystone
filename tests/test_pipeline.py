@@ -126,10 +126,9 @@ def test_observed_date_priority() -> None:
     modified = datetime(2027, 1, 1, tzinfo=UTC)
     doc = text_doc(modified_at=modified, file_name="2025-03-10_plan.md")
     assert observed_date(doc, written) == written  # the document's own date wins
-    assert observed_date(doc, None) == modified
-    assert observed_date(text_doc(file_name="2025-03-10_plan.md"), None) == datetime(
-        2025, 3, 10, tzinfo=UTC
-    )
+    # A date in the file name beats the file's modification time (changed by copying).
+    assert observed_date(doc, None) == datetime(2025, 3, 10, tzinfo=UTC)
+    assert observed_date(text_doc(modified_at=modified), None) == modified
 
 
 def test_source_kind_and_confidence() -> None:

@@ -55,11 +55,12 @@ class FactView:
     object: str
     text: str
     status: str
-    since: datetime | None
+    since: datetime | None  # when the claim was made (newest source document)
     ended: datetime | None
     note: str
     sources: list[SourceView]
     conflicts_with: list[str]
+    valid_from: datetime | None = None  # when it became true per the text, if stated
 
 
 @dataclass
@@ -117,6 +118,7 @@ def fact_view(fact: Fact, provenance: dict[str, Provenance], scope: list[str]) -
         text=fact.text,
         status=str(fact.status),
         since=fact.observed_at,
+        valid_from=fact.valid_from,
         ended=fact.ended_at,
         note=fact.note,
         sources=sorted(sources, key=lambda s: s.observed_at),
@@ -149,15 +151,21 @@ async def fact_views(
 # --- Tools -------------------------------------------------------------------------------------
 
 
+def _summary_allowed(graph: KeystoneGraph, scope: list[str]) -> bool:
+    """Graphiti writes entity summaries from ALL documents, so a summary can mention facts from
+    any business function. It cannot be filtered, so only callers with every function see it."""
+    return set(graph.ontology.business_functions) <= set(scope)
+
+
 async def search_entities(
     graph: KeystoneGraph, query: str, scope: list[str], limit: int = 10
 ) -> list[EntitySummary]:
-    """Entities whose name, alias or summary matches the query, best first."""
+    """Entities whose name or alias matches the query, best first."""
     known = set(graph.ontology.entity_types)
+    show_summary = _summary_allowed(graph, scope)
     rows = await graph.query(
         f"MATCH (n:Entity {{group_id: $group}}) "
         f"WHERE {NODE_IN_SCOPE} AND (toLower(n.name) CONTAINS toLower($q) "
-        f"  OR toLower(coalesce(n.summary, '')) CONTAINS toLower($q) "
         f"  OR EXISTS {{ MATCH (n)-[:{SAME_AS}*1..5]-(m:Entity) "
         f"               WHERE toLower(m.name) CONTAINS toLower($q) }}) "
         f"OPTIONAL MATCH (n)-[:{SAME_AS}*1..5]-(alias:Entity) "
@@ -178,7 +186,7 @@ async def search_entities(
             name=str(r["name"]),
             entity_type=_entity_type([str(x) for x in r["labels"]], known),  # type: ignore[attr-defined]
             aliases=sorted(str(a) for a in r["aliases"]),  # type: ignore[attr-defined]
-            summary=str(r["summary"] or ""),
+            summary=str(r["summary"] or "") if show_summary else "",
         )
         for r in rows
     ]
@@ -219,7 +227,7 @@ async def get_entity(graph: KeystoneGraph, uuid: str, scope: list[str]) -> Entit
             name=str(props.get("name", "")),
             entity_type=entity_type,
             aliases=sorted(str(a) for a in row["aliases"]),  # type: ignore[attr-defined]
-            summary=str(props.get("summary") or ""),
+            summary=str(props.get("summary") or "") if _summary_allowed(graph, scope) else "",
         ),
         business_functions=sorted(str(f) for f in row["functions"]),  # type: ignore[attr-defined]
         properties={k: v for k, v in props.items() if k in allowed and v is not None},

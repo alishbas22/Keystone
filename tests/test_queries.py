@@ -120,6 +120,33 @@ async def test_path_never_crosses_out_of_scope_facts(
     assert [f.relation for f in full] == ["reports_to", "manages_account"]
 
 
+# --- Regressions found on real data -------------------------------------------------------------
+
+
+async def test_time_rule_uses_source_dates_not_graphiti_valid_at(
+    graph: KeystoneGraph, data: Brightline
+) -> None:
+    """Graphiti falls back to the ingestion time for valid_at when the text has no date. The
+    2025 account plan must still lose to the 2026 memo."""
+    await graph.query(
+        "MATCH ()-[e:RELATES_TO {uuid: $uuid}]->() SET e.valid_at = datetime()",
+        uuid=data.facts["sara_manages"],
+    )
+    conflict = (await queries.get_conflicts(graph, ["Sales"]))[0]
+    assert conflict.winner == data.facts["bilal_manages"]
+
+
+async def test_summaries_do_not_leak_across_business_functions(
+    graph: KeystoneGraph, data: Brightline
+) -> None:
+    """Graphiti summaries are written from all documents, so scoped callers never see or search them."""
+    assert await names(graph, "summary", ["Finance"]) == []  # no matching through summaries
+    sales = await queries.get_entity(graph, data.entities["Harbor Hotels Group"], ["Sales"])
+    full = await queries.get_entity(graph, data.entities["Harbor Hotels Group"], ALL)
+    assert sales is not None and sales.entity.summary == ""
+    assert full is not None and full.entity.summary == "Harbor Hotels Group summary"
+
+
 # --- get_conflicts / explain_claim -------------------------------------------------------------
 
 

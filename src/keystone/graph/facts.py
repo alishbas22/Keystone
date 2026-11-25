@@ -48,6 +48,7 @@ async def build_facts(
             for u in sources
         )
         dates = [e.observed_at for e in evidence if e.observed_at]
+        valid_from = native(edge.valid_at)
         facts.append(
             Fact(
                 id=edge.uuid,
@@ -55,8 +56,11 @@ async def build_facts(
                 relation=edge.name.lower(),
                 object=name(edge.target_node_uuid),
                 text=edge.fact,
-                # When the fact became true (e.g. "effective 1 September"), else when written.
-                observed_at=native(edge.valid_at) or (max(dates) if dates else None),
+                # When the claim was made: the newest source document saying it (CLAUDE.md:
+                # "the newer claim is current"). Graphiti's valid_at is kept separately: it
+                # falls back to the ingestion reference time when the text has no date.
+                observed_at=max(dates) if dates else valid_from,
+                valid_from=valid_from,
                 ended_at=native(edge.invalid_at) or native(edge.expired_at),
                 sources=sources,
                 evidence=evidence,
