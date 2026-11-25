@@ -1,5 +1,7 @@
 # Keystone
 
+[![CI](https://github.com/alishbas22/Keystone/actions/workflows/ci.yml/badge.svg)](https://github.com/alishbas22/Keystone/actions/workflows/ci.yml)
+
 **Open-source business ontology layer for AI agents.**
 *Every fact has a source. Every answer has proof.*
 

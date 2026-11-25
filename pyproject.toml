@@ -19,6 +19,9 @@ dependencies = [
     "docling>=2.152,<3",
     "streamlit>=1.40",
     "truststore>=0.10",
+    # Used by Docling. Listed here only to pick the CPU-only build on Linux (see tool.uv).
+    "torch>=2.15",
+    "torchvision>=0.29",
 ]
 
 [dependency-groups]
@@ -38,6 +41,17 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/keystone"]
+
+# On Linux (CI, Docker) PyPI's torch bundles several GB of GPU (CUDA) libraries that Keystone
+# does not need. Use the CPU-only builds there. Windows and macOS wheels on PyPI are CPU-only.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 
 [tool.ruff]
 line-length = 100
