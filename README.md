@@ -37,6 +37,25 @@ curl http://localhost:8000/health
 - Keystone API: http://localhost:8000 (interactive docs at http://localhost:8000/docs)
 - Neo4j Browser: http://localhost:7474 (user `neo4j`, password from `.env`)
 
+### Demo: upload documents and ask questions
+
+Needs an OpenAI API key in `.env` (`OPENAI_API_KEY=sk-...`) and Neo4j running
+(`docker compose up -d`).
+
+```bash
+uv run streamlit run ui/app.py          # opens http://localhost:8501
+```
+
+Click **Load the sample documents** (5 files from a fictional company, with one planted
+contradiction), then ask *"Who is our biggest customer and who manages their account?"*.
+The same from the command line:
+
+```bash
+uv run python demo/ask.py --load "Who manages Harbor Hotels Group?"
+```
+
+To regenerate the sample files: `uv run python demo/make_sample_docs.py`.
+
 ### Local development
 
 ```bash

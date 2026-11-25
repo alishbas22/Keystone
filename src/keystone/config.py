@@ -14,6 +14,14 @@ class Settings(BaseSettings):
     neo4j_password: SecretStr = SecretStr("")
     neo4j_database: str = "neo4j"
 
+    # LLM (extraction + answers) and embeddings (search). OpenAI is Graphiti's default.
+    openai_api_key: SecretStr = SecretStr("")
+    llm_model: str | None = None  # None = Graphiti's default model
+    embedding_model: str | None = None
+
+    # Graph partition the demo writes into (Graphiti "group_id").
+    graph_group: str = "keystone-demo"
+
 
 @lru_cache
 def get_settings() -> Settings:
