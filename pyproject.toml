@@ -22,7 +22,14 @@ dependencies = [
     # Used by Docling. Listed here only to pick the CPU-only build on Linux (see tool.uv).
     "torch>=2.15",
     "torchvision>=0.29",
+    "sqlalchemy>=2.0,<3",
+    "psycopg[binary]>=3.2,<4",
 ]
+
+# Built-in connectors register the same way third-party connector packages do.
+[project.entry-points."keystone.connectors"]
+folder = "keystone.connectors.folder:FolderConnector"
+sql = "keystone.connectors.sql:SqlConnector"
 
 [dependency-groups]
 dev = [
@@ -60,6 +67,9 @@ extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]  # test data tables read better one row per line
 
 [tool.mypy]
 python_version = "3.12"

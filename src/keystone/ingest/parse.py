@@ -27,22 +27,10 @@ from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling_core.transforms.chunker.hierarchical_chunker import HierarchicalChunker
 
 from keystone.connectors.base import Document
+from keystone.ingest.formats import FORMAT_NAMES, SUPPORTED_SUFFIXES
 
 # File extension -> Docling format (MVP scope from CLAUDE.md, plus HTML and CSV).
-FORMATS = {
-    ".pdf": InputFormat.PDF,
-    ".docx": InputFormat.DOCX,
-    ".xlsx": InputFormat.XLSX,
-    ".pptx": InputFormat.PPTX,
-    ".eml": InputFormat.EMAIL,
-    ".msg": InputFormat.EMAIL,
-    ".md": InputFormat.MD,
-    ".txt": InputFormat.MD,
-    ".html": InputFormat.HTML,
-    ".htm": InputFormat.HTML,
-    ".csv": InputFormat.CSV,
-}
-SUPPORTED_SUFFIXES = sorted(FORMATS)
+FORMATS = {suffix: InputFormat[name] for suffix, name in FORMAT_NAMES.items()}
 MAX_SECTION_CHARS = 3000
 _DATE_PREFIX = re.compile(r"^(\d{4}-\d{2}-\d{2})")
 
