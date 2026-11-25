@@ -175,9 +175,11 @@ def parse_document(document: Document) -> ParsedDocument:
         if Path(name).suffix.lower() not in FORMATS:
             name = f"{name}.md"
         parsed = parse_bytes(name, (document.text or "").encode("utf-8"))
+    # Prefer a title found inside the document; else the connector's title.
+    has_own_title = parsed.title != _title_from_filename(parsed.file_name)
     return ParsedDocument(
         file_name=parsed.file_name,
-        title=document.title or parsed.title,
+        title=parsed.title if has_own_title or not document.title else document.title,
         doc_id=document.content_hash,
         sections=parsed.sections,
         author=parsed.author or document.author,

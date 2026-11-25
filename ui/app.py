@@ -1,10 +1,9 @@
-"""Keystone demo UI: upload documents, ask a question, see the answer with its sources.
+"""Keystone UI: upload documents, ask a question, see the answer with its sources.
 
 uv run streamlit run ui/app.py
 """
 
 import asyncio
-import tempfile
 from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime, time
 from pathlib import Path
@@ -16,24 +15,14 @@ from keystone.net import configure_network
 
 configure_network()
 
-from graphiti_core import Graphiti  # noqa: E402
-
 from keystone.config import get_settings  # noqa: E402
-from keystone.graph.engine import (  # noqa: E402
-    MissingApiKeyError,
-    delete_all,
-    ingest_document,
-    list_documents,
-    open_graph,
-)
+from keystone.connectors import Document  # noqa: E402
+from keystone.connectors.folder import FolderConnector  # noqa: E402
+from keystone.graph.engine import KeystoneGraph, open_graph  # noqa: E402
 from keystone.graph.qa import Answer, answer_question  # noqa: E402
 from keystone.graph.truth import Status  # noqa: E402
-from keystone.ingest.parse import (  # noqa: E402
-    SUPPORTED_SUFFIXES,
-    ParsedDocument,
-    date_from_filename,
-    parse_file,
-)
+from keystone.ingest.parse import SUPPORTED_SUFFIXES, ParsedDocument, parse_document  # noqa: E402
+from keystone.ingest.pipeline import ingest_document  # noqa: E402
 from keystone.ontology import active_ontology  # noqa: E402
 
 SAMPLE_DIR = Path(__file__).resolve().parents[1] / "demo" / "data"
@@ -57,42 +46,35 @@ T = TypeVar("T")
 settings = get_settings()
 functions = active_ontology().business_functions
 
-st.set_page_config(page_title="Keystone demo", page_icon="🗝️", layout="wide")
+st.set_page_config(page_title="Keystone", page_icon="🗝️", layout="wide")
 
 
-def run_with_graph(action: Callable[[Graphiti], Awaitable[T]]) -> T:
+def run_with_graph(action: Callable[[KeystoneGraph], Awaitable[T]]) -> T:
     """Run an async graph action from Streamlit's synchronous script."""
 
     async def main() -> T:
         async with open_graph(settings) as graph:
-            if not st.session_state.get("indices_ready"):
-                await graph.build_indices_and_constraints()
-                st.session_state["indices_ready"] = True
+            if not st.session_state.get("graph_ready"):
+                await graph.setup()
+                st.session_state["graph_ready"] = True
             return await action(graph)
 
     return asyncio.run(main())
 
 
 @st.cache_data(show_spinner=False)
-def parse_cached(path: str, _mtime: float) -> ParsedDocument:
-    return parse_file(Path(path))
+def preview(_document: Document, content_hash: str) -> ParsedDocument:
+    return parse_document(_document)
 
 
-def ingest(items: list[tuple[Path, str, datetime]]) -> None:
+def ingest(items: list[tuple[Document, str]]) -> None:
     status = st.status("Ingesting documents…", expanded=True)
 
-    async def work(graph: Graphiti) -> None:
-        for path, function, observed in items:
-            status.write(f"📄 **{path.name}**: reading with Docling…")
-            doc = parse_cached(str(path), path.stat().st_mtime)
-            bar = status.progress(0.0, text=f"{len(doc.sections)} sections")
-
-            def progress(i: int, total: int, heading: str, bar=bar) -> None:  # noqa: B008
-                bar.progress((i - 1) / total, text=f"Extracting section {i}/{total}: {heading}")
-
-            when = doc.written_at or observed  # e.g. an email's own sent date wins
-            stored = await ingest_document(graph, doc, function, when, progress, settings)
-            bar.progress(1.0, text="Done" if stored else "Already in the graph, skipped")
+    async def work(graph: KeystoneGraph) -> None:
+        for document, function in items:
+            status.write(f"📄 **{document.title}**")
+            result = await ingest_document(graph, document, function, status.caption)
+            status.write(f"→ {result.status} {result.message}".strip())
 
     try:
         run_with_graph(work)
@@ -106,21 +88,21 @@ def ingest(items: list[tuple[Path, str, datetime]]) -> None:
 
 with st.sidebar:
     st.header("Setup")
-    key_ok = bool(settings.openai_api_key.get_secret_value())
+    key_ok = bool(settings.api_key)
     if key_ok:
-        st.success("OpenAI API key found")
+        st.success(f"{settings.llm_provider.title()} API key found")
     else:
         st.error(
-            "No OpenAI API key. Add `OPENAI_API_KEY=sk-...` to the `.env` file in the "
-            "keystone folder, then restart this app."
+            f"No API key. Add `{settings.api_key_name}=...` to the `.env` file in the keystone "
+            "folder, then restart this app."
         )
     st.caption(f"Neo4j: `{settings.neo4j_uri}` · graph: `{settings.graph_group}`")
     st.divider()
     with st.expander("Danger zone"):
-        confirm = st.checkbox("Yes, delete everything in the demo graph")
-        if st.button("Delete demo data", disabled=not (confirm and key_ok)):
-            run_with_graph(lambda g: delete_all(g, settings.graph_group))
-            st.success("Demo graph cleared.")
+        confirm = st.checkbox("Yes, delete everything in the graph")
+        if st.button("Delete all data", disabled=not (confirm and key_ok)):
+            run_with_graph(lambda g: g.delete_all())
+            st.success("Graph cleared.")
 
 st.title("🗝️ Keystone")
 st.caption("Every fact has a source. Every answer has proof.")
@@ -134,21 +116,21 @@ with docs_tab:
 
     with left:
         st.subheader("Sample company")
-        samples = sorted(SAMPLE_DIR.glob("*.*")) if SAMPLE_DIR.exists() else []
-        samples = [p for p in samples if p.suffix.lower() in SUPPORTED_SUFFIXES]
         st.write(
-            "Five documents from *Brightline Furnishings Ltd*. One planted contradiction: "
-            "the 2025 account plan and the 2026 memo name different account managers for "
-            "Harbor Hotels Group."
+            "Documents from *Brightline Furnishings Ltd*, with a planted contradiction: the "
+            "2025 account plan and the 2026 memo name different account managers for Harbor "
+            "Hotels Group."
         )
-        for p in samples:
-            st.write(f"- `{p.name}`")
+        sample_docs = list(FolderConnector({"path": SAMPLE_DIR}, "samples").read())
+        for doc in sample_docs:
+            st.write(f"- `{doc.file_name}`")
         if st.button("Load the sample documents", type="primary", disabled=not key_ok):
-            items = []
-            for p in samples:
-                function = next((f for k, f in SAMPLE_FUNCTIONS.items() if k in p.name), "Sales")
-                items.append((p, function, date_from_filename(p.name) or datetime.now(UTC)))
-            ingest(items)
+            ingest(
+                [
+                    (d, next((f for k, f in SAMPLE_FUNCTIONS.items() if k in d.id), "Sales"))
+                    for d in sample_docs
+                ]
+            )
 
     with right:
         st.subheader("Upload your own")
@@ -158,47 +140,46 @@ with docs_tab:
             accept_multiple_files=True,
         )
         function = st.selectbox("Business function", functions)
-        fallback_day = st.date_input(
-            "Document date (used when the file name does not start with YYYY-MM-DD)", date.today()
-        )
+        day = st.date_input("Document date (if the file has none of its own)", date.today())
         if uploads:
-            upload_dir = Path(tempfile.gettempdir()) / "keystone_uploads"
-            upload_dir.mkdir(exist_ok=True)
-            paths = []
-            for upload in uploads:
-                target = upload_dir / Path(upload.name).name
-                target.write_bytes(upload.getvalue())
-                paths.append(target)
+            documents = [
+                Document(
+                    id=upload.name,
+                    source="upload:ui",
+                    title=Path(upload.name).stem.replace("_", " "),
+                    file_name=upload.name,
+                    content=upload.getvalue(),
+                    modified_at=datetime.combine(day, time(), tzinfo=UTC),
+                )
+                for upload in uploads
+            ]
             with st.expander("Preview how Docling splits the files (no LLM, free)"):
-                for p in paths:
-                    doc = parse_cached(str(p), p.stat().st_mtime)
-                    st.markdown(f"**{p.name}**: {doc.title}")
-                    for s in doc.sections:
+                for doc in documents:
+                    parsed = preview(doc, doc.content_hash)
+                    st.markdown(f"**{doc.file_name}**: {parsed.title}")
+                    for s in parsed.sections:
                         st.markdown(f"- *{s.heading}* {s.pages}: {s.text[:150]}…")
             if st.button("Ingest uploaded files", disabled=not key_ok):
-                fallback = datetime.combine(fallback_day, time(), tzinfo=UTC)
-                ingest([(p, function, date_from_filename(p.name) or fallback) for p in paths])
+                ingest([(doc, function) for doc in documents])
 
     st.subheader("Documents in the graph")
     if key_ok:
         try:
-            docs = run_with_graph(lambda g: list_documents(g, settings.graph_group))
-        except MissingApiKeyError as exc:
-            st.error(str(exc))
-            docs = []
+            stored = run_with_graph(lambda g: g.list_documents())
         except Exception as exc:
             st.error(f"Could not reach Neo4j. Is Docker running? ({type(exc).__name__}: {exc})")
-            docs = []
-        if docs:
+            stored = []
+        if stored:
             st.dataframe(
                 [
                     {
-                        "file": d.file,
-                        "date": d.observed_at.date() if d.observed_at else None,
+                        "document": d.file or d.title,
+                        "date": d.observed_at.date(),
                         "business function": d.business_function,
+                        "source": d.source,
                         "sections": d.sections,
                     }
-                    for d in docs
+                    for d in stored
                 ],
                 hide_index=True,
                 use_container_width=True,
@@ -234,7 +215,7 @@ with ask_tab:
         for n, fact in enumerate(answer.facts, start=1):
             if only_cited and n not in answer.cited:
                 continue
-            refs = [answer.sources[u].ref for u in fact.sources]
+            refs = [answer.sources[u] for u in fact.sources]
             rows.append(
                 {
                     "#": n,
@@ -243,7 +224,7 @@ with ask_tab:
                     "relation": fact.relation.upper(),
                     "since": fact.observed_at.date() if fact.observed_at else None,
                     "ended": fact.ended_at.date() if fact.ended_at else None,
-                    "source": "; ".join(f"{r.file} › {r.section} {r.pages}".strip() for r in refs),
+                    "source": "; ".join(sorted({r.location for r in refs})),
                     "function": ", ".join(sorted({r.business_function for r in refs})),
                     "note": fact.note,
                 }

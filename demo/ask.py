@@ -1,22 +1,21 @@
-"""Command-line version of the demo: load the sample documents and ask a question.
+"""Command line: load the sample documents into the graph and ask a question.
 
-uv run python demo/ask.py --load            # ingest demo/data (skips files already loaded)
+uv run python demo/ask.py --load            # ingest demo/data (skips unchanged files)
 uv run python demo/ask.py "Who manages Harbor Hotels Group?"
 """
 
 import argparse
 import asyncio
-from datetime import UTC, datetime
 from pathlib import Path
 
 from keystone.net import configure_network
 
 configure_network()
 
-from keystone.config import get_settings  # noqa: E402
-from keystone.graph.engine import ingest_document, open_graph  # noqa: E402
+from keystone.connectors.folder import FolderConnector  # noqa: E402
+from keystone.graph.engine import open_graph  # noqa: E402
 from keystone.graph.qa import answer_question  # noqa: E402
-from keystone.ingest.parse import SUPPORTED_SUFFIXES, date_from_filename, parse_file  # noqa: E402
+from keystone.ingest.pipeline import ingest_document  # noqa: E402
 
 DATA = Path(__file__).parent / "data"
 FUNCTIONS = {
@@ -30,19 +29,11 @@ FUNCTIONS = {
 
 async def load() -> None:
     async with open_graph() as graph:
-        await graph.build_indices_and_constraints()
-        for path in sorted(p for p in DATA.iterdir() if p.suffix in SUPPORTED_SUFFIXES):
-            doc = parse_file(path)
-            function = next((f for k, f in FUNCTIONS.items() if k in path.name), "Sales")
-            when = doc.written_at or date_from_filename(path.name) or datetime.now(UTC)
-            print(f"{path.name}: {len(doc.sections)} sections ({function}, {when.date()})")
-
-            def progress(i: int, total: int, heading: str) -> None:
-                print(f"   [{i}/{total}] {heading}")
-
-            stored = await ingest_document(graph, doc, function, when, progress, get_settings())
-            if not stored:
-                print("   already in the graph, skipped")
+        await graph.setup()
+        for document in FolderConnector({"path": DATA}, "samples").read():
+            function = next((f for k, f in FUNCTIONS.items() if k in document.id), "Sales")
+            result = await ingest_document(graph, document, function, print)
+            print(f"{document.id}: {result.status} {result.message}".strip())
 
 
 async def ask(question: str) -> None:
@@ -51,8 +42,8 @@ async def ask(question: str) -> None:
     print(f"\nQ: {question}\nA: {answer.text}\n")
     for n, fact in enumerate(answer.facts, start=1):
         if n in answer.cited:
-            files = {answer.sources[u].ref.file for u in fact.sources}
-            print(f"[{n}] {fact.status:<10} {fact.text}  <- {', '.join(sorted(files))}")
+            where = "; ".join(sorted({answer.sources[u].location for u in fact.sources}))
+            print(f"[{n}] {fact.status:<10} {fact.text}  <- {where}")
 
 
 def main() -> None:

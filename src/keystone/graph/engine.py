@@ -1,166 +1,230 @@
-"""Graphiti integration (KAN-23, minimal): connect, store document sections, find sources.
+"""Graphiti integration (KAN-23): the knowledge graph behind Keystone.
 
-Each document section becomes one Graphiti "episode". Graphiti's LLM extracts entities and
-relations constrained to the Keystone ontology (via to_graphiti), resolves duplicates and keeps
-validity dates on every fact. The episode's `source_description` records where the text came
-from, so every fact can be traced back to a file, section and page.
+Each document section is stored as one Graphiti "episode". Graphiti's LLM extracts entities
+and relations constrained to the Keystone ontology (via to_graphiti), merges duplicates and
+keeps validity dates on every fact. Keystone adds a provenance record to every episode (see
+provenance.py), so each fact traces back to a source, author, date and business function.
 """
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from graphiti_core import Graphiti
-from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
-from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
+from graphiti_core.graphiti import AddEpisodeResults
 from graphiti_core.llm_client.config import LLMConfig
-from graphiti_core.llm_client.openai_client import OpenAIClient
 from graphiti_core.nodes import EpisodeType
 from graphiti_core.utils.maintenance.graph_data_operations import clear_data
 
 from keystone.config import Settings, get_settings
-from keystone.ingest.parse import ParsedDocument
-from keystone.ontology import active_ontology, to_graphiti
+from keystone.graph.provenance import PROVENANCE_REL, SOURCE_LABEL, Provenance
+from keystone.ontology import Ontology, active_ontology, to_graphiti
+from keystone.ontology.to_graphiti import GraphitiSchema
 
 
 class MissingApiKeyError(RuntimeError):
     pass
 
 
-@dataclass(frozen=True)
-class SourceRef:
-    """Where a piece of text came from. Stored as the episode's `source_description`."""
+def make_graphiti(settings: Settings | None = None) -> Graphiti:
+    """A Graphiti client for the configured LLM provider (Gemini or OpenAI)."""
+    settings = settings or get_settings()
+    api_key = settings.api_key
+    if not api_key:
+        raise MissingApiKeyError(f"{settings.api_key_name} is not set. Add it to the .env file.")
+    llm_config = LLMConfig(
+        api_key=api_key, model=settings.llm_model, small_model=settings.llm_small_model
+    )
+    uri, user = settings.neo4j_uri, settings.neo4j_user
+    password = settings.neo4j_password.get_secret_value()
 
-    file: str
-    section: str
-    pages: str
-    business_function: str
-    doc_id: str
+    if settings.llm_provider == "gemini":
+        from graphiti_core.cross_encoder.gemini_reranker_client import GeminiRerankerClient
+        from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
+        from graphiti_core.llm_client.gemini_client import GeminiClient
 
-    def to_description(self) -> str:
-        return " | ".join(
-            [self.file, self.section, self.pages, self.business_function, f"doc:{self.doc_id}"]
+        gemini_embedder = GeminiEmbedderConfig(api_key=api_key)
+        if settings.embedding_model:
+            gemini_embedder.embedding_model = settings.embedding_model
+        return Graphiti(
+            uri,
+            user,
+            password,
+            llm_client=GeminiClient(config=llm_config),
+            embedder=GeminiEmbedder(config=gemini_embedder),
+            cross_encoder=GeminiRerankerClient(config=LLMConfig(api_key=api_key)),
         )
 
-    @classmethod
-    def from_description(cls, text: str) -> "SourceRef":
-        parts = [p.strip() for p in text.split(" | ")]
-        if len(parts) != 5 or not parts[4].startswith("doc:"):
-            return cls(file=text, section="", pages="", business_function="", doc_id="")
-        return cls(parts[0], parts[1], parts[2], parts[3], parts[4].removeprefix("doc:"))
+    from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
+    from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
+    from graphiti_core.llm_client.openai_client import OpenAIClient
 
-
-def make_graphiti(settings: Settings | None = None) -> Graphiti:
-    settings = settings or get_settings()
-    api_key = settings.openai_api_key.get_secret_value()
-    if not api_key:
-        raise MissingApiKeyError("OPENAI_API_KEY is not set. Add it to the .env file.")
-    llm_config = LLMConfig(
-        api_key=api_key, model=settings.llm_model, small_model=settings.llm_model
-    )
-    embedder_config = OpenAIEmbedderConfig(api_key=api_key)
+    openai_embedder = OpenAIEmbedderConfig(api_key=api_key)
     if settings.embedding_model:
-        embedder_config.embedding_model = settings.embedding_model
+        openai_embedder.embedding_model = settings.embedding_model
     return Graphiti(
-        settings.neo4j_uri,
-        settings.neo4j_user,
-        settings.neo4j_password.get_secret_value(),
+        uri,
+        user,
+        password,
         llm_client=OpenAIClient(config=llm_config),
-        embedder=OpenAIEmbedder(config=embedder_config),
+        embedder=OpenAIEmbedder(config=openai_embedder),
         cross_encoder=OpenAIRerankerClient(config=LLMConfig(api_key=api_key)),
     )
 
 
+@dataclass(frozen=True)
+class StoredDocument:
+    doc_id: str
+    title: str
+    file: str | None
+    source: str
+    business_function: str
+    observed_at: datetime
+    sections: int
+
+
+class KeystoneGraph:
+    """Graphiti plus Keystone provenance. Use `open_graph()` to get one."""
+
+    def __init__(
+        self, graphiti: Graphiti, settings: Settings | None = None, ontology: Ontology | None = None
+    ):
+        self.graphiti = graphiti
+        self.settings = settings or get_settings()
+        self.ontology = ontology or active_ontology()
+        self.group = self.settings.graph_group
+        self._schema: GraphitiSchema | None = None
+
+    @property
+    def schema(self) -> GraphitiSchema:
+        if self._schema is None:
+            self._schema = to_graphiti(self.ontology)
+        return self._schema
+
+    async def query(self, cypher: str, **params: object) -> list[dict[str, object]]:
+        records, _, _ = await self.graphiti.driver.execute_query(cypher, **params)
+        return [dict(r) for r in records]
+
+    async def setup(self) -> None:
+        """Create Graphiti's indexes plus Keystone's own (safe to run on every start)."""
+        await self.graphiti.build_indices_and_constraints()
+        await self.query(
+            f"CREATE INDEX keystone_source_episode IF NOT EXISTS "
+            f"FOR (s:{SOURCE_LABEL}) ON (s.episode_uuid)"
+        )
+        await self.query(
+            f"CREATE INDEX keystone_source_doc IF NOT EXISTS FOR (s:{SOURCE_LABEL}) ON (s.doc_id)"
+        )
+
+    async def add_section(self, provenance: Provenance, body: str) -> AddEpisodeResults:
+        """Store one section: Graphiti extracts facts, Keystone records where they came from."""
+        if provenance.business_function not in self.ontology.business_functions:
+            raise ValueError(
+                f"business_function must be one of {self.ontology.business_functions}, "
+                f"got '{provenance.business_function}'"
+            )
+        observed = provenance.observed_at
+        if observed.tzinfo is None:
+            observed = observed.replace(tzinfo=UTC)
+        result = await self.graphiti.add_episode(
+            name=f"{provenance.title} - {provenance.section}"[:200],
+            episode_body=body,
+            source_description=f"{provenance.location} ({provenance.business_function})",
+            reference_time=observed,
+            source=EpisodeType.text,
+            group_id=self.group,
+            **self.schema.add_episode_kwargs(),
+        )
+        await self.record_provenance(result.episode.uuid, provenance)
+        return result
+
+    async def record_provenance(self, episode_uuid: str, provenance: Provenance) -> None:
+        """Attach Keystone's provenance record to a Graphiti episode."""
+        await self.query(
+            f"MATCH (e:Episodic {{uuid: $episode_uuid}}) "
+            f"CREATE (e)-[:{PROVENANCE_REL}]->(s:{SOURCE_LABEL}) "
+            f"SET s = $props, s.episode_uuid = $episode_uuid, s.group_id = $group",
+            episode_uuid=episode_uuid,
+            props=provenance.to_properties(),
+            group=self.group,
+        )
+
+    async def has_document(self, doc_id: str) -> bool:
+        rows = await self.query(
+            f"MATCH (s:{SOURCE_LABEL} {{doc_id: $doc_id, group_id: $group}}) RETURN count(s) AS n",
+            doc_id=doc_id,
+            group=self.group,
+        )
+        return bool(rows and int(str(rows[0]["n"])) > 0)
+
+    async def provenance(self, episode_uuids: list[str]) -> dict[str, Provenance]:
+        """Provenance for each episode uuid (episodes without a record are left out)."""
+        if not episode_uuids:
+            return {}
+        rows = await self.query(
+            f"MATCH (s:{SOURCE_LABEL}) WHERE s.episode_uuid IN $uuids "
+            f"RETURN s.episode_uuid AS uuid, properties(s) AS props",
+            uuids=episode_uuids,
+        )
+        return {
+            str(r["uuid"]): Provenance.from_properties(dict(r["props"]))  # type: ignore[call-overload]
+            for r in rows
+        }
+
+    async def list_documents(self) -> list[StoredDocument]:
+        rows = await self.query(
+            f"MATCH (s:{SOURCE_LABEL} {{group_id: $group}}) "
+            f"RETURN s.doc_id AS doc_id, collect(properties(s)) AS sections",
+            group=self.group,
+        )
+        documents = []
+        for row in rows:
+            sections = [Provenance.from_properties(dict(p)) for p in row["sections"]]  # type: ignore[attr-defined]
+            first = sections[0]
+            documents.append(
+                StoredDocument(
+                    doc_id=first.doc_id,
+                    title=first.title,
+                    file=first.file,
+                    source=first.source,
+                    business_function=first.business_function,
+                    observed_at=first.observed_at,
+                    sections=len(sections),
+                )
+            )
+        return sorted(documents, key=lambda d: d.observed_at)
+
+    async def delete_document(self, doc_id: str) -> int:
+        """Remove a document's episodes (and facts only it supported). Returns episodes removed."""
+        rows = await self.query(
+            f"MATCH (s:{SOURCE_LABEL} {{doc_id: $doc_id, group_id: $group}}) "
+            f"RETURN s.episode_uuid AS uuid",
+            doc_id=doc_id,
+            group=self.group,
+        )
+        for row in rows:
+            await self.graphiti.remove_episode(str(row["uuid"]))
+        await self.query(
+            f"MATCH (s:{SOURCE_LABEL} {{doc_id: $doc_id, group_id: $group}}) DETACH DELETE s",
+            doc_id=doc_id,
+            group=self.group,
+        )
+        return len(rows)
+
+    async def delete_all(self) -> None:
+        """Delete everything in this Keystone graph (Graphiti data and provenance)."""
+        await clear_data(self.graphiti.driver, group_ids=[self.group])
+        await self.query(
+            f"MATCH (s:{SOURCE_LABEL} {{group_id: $group}}) DETACH DELETE s", group=self.group
+        )
+
+
 @asynccontextmanager
-async def open_graph(settings: Settings | None = None) -> AsyncIterator[Graphiti]:
+async def open_graph(settings: Settings | None = None) -> AsyncIterator[KeystoneGraph]:
+    settings = settings or get_settings()
     graphiti = make_graphiti(settings)
     try:
-        yield graphiti
+        yield KeystoneGraph(graphiti, settings)
     finally:
         await graphiti.close()  # type: ignore[no-untyped-call]  # untyped in graphiti-core
-
-
-async def is_ingested(graphiti: Graphiti, doc_id: str, group: str) -> bool:
-    records, _, _ = await graphiti.driver.execute_query(
-        "MATCH (e:Episodic {group_id: $group}) WHERE e.source_description ENDS WITH $suffix "
-        "RETURN count(e) AS n",
-        group=group,
-        suffix=f"doc:{doc_id}",
-    )
-    return bool(records and records[0]["n"] > 0)
-
-
-async def ingest_document(
-    graphiti: Graphiti,
-    doc: ParsedDocument,
-    business_function: str,
-    observed_at: datetime,
-    on_progress: Callable[[int, int, str], None] | None = None,
-    settings: Settings | None = None,
-) -> int:
-    """Store every section of a parsed document as an episode. Returns the number stored.
-
-    Skips the document if a file with the same content was already ingested.
-    """
-    settings = settings or get_settings()
-    ontology = active_ontology()
-    if business_function not in ontology.business_functions:
-        raise ValueError(f"business_function must be one of {ontology.business_functions}")
-    if await is_ingested(graphiti, doc.doc_id, settings.graph_group):
-        return 0
-    if observed_at.tzinfo is None:
-        observed_at = observed_at.replace(tzinfo=UTC)
-
-    schema = to_graphiti(ontology)
-    total = len(doc.sections)
-    for i, section in enumerate(doc.sections, start=1):
-        if on_progress:
-            on_progress(i, total, section.heading)
-        source = SourceRef(
-            file=doc.file_name,
-            section=section.heading,
-            pages=section.pages,
-            business_function=business_function,
-            doc_id=doc.doc_id,
-        )
-        await graphiti.add_episode(
-            name=f"{doc.file_name} - {section.heading}"[:200],
-            episode_body=f"Document: {doc.title}\nSection: {section.heading}\n\n{section.text}",
-            source_description=source.to_description(),
-            reference_time=observed_at,
-            source=EpisodeType.text,
-            group_id=settings.graph_group,
-            **schema.add_episode_kwargs(),
-        )
-    return total
-
-
-@dataclass(frozen=True)
-class IngestedDocument:
-    file: str
-    business_function: str
-    doc_id: str
-    sections: int
-    observed_at: datetime
-
-
-async def list_documents(graphiti: Graphiti, group: str) -> list[IngestedDocument]:
-    records, _, _ = await graphiti.driver.execute_query(
-        "MATCH (e:Episodic {group_id: $group}) "
-        "RETURN e.source_description AS source, e.valid_at AS observed_at",
-        group=group,
-    )
-    docs: dict[str, IngestedDocument] = {}
-    for record in records:
-        ref = SourceRef.from_description(record["source"])
-        observed = record["observed_at"]
-        observed = observed.to_native() if hasattr(observed, "to_native") else observed
-        key = ref.doc_id or ref.file
-        count = docs[key].sections + 1 if key in docs else 1
-        docs[key] = IngestedDocument(ref.file, ref.business_function, ref.doc_id, count, observed)
-    return sorted(docs.values(), key=lambda d: d.observed_at)
-
-
-async def delete_all(graphiti: Graphiti, group: str) -> None:
-    await clear_data(graphiti.driver, group_ids=[group])
