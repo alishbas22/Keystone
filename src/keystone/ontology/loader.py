@@ -20,7 +20,7 @@ _DEFAULT_DIR = Path(__file__).resolve().parents[3] / "ontology"
 
 CORE_FILES = ("core.yaml", "interfaces.yaml", "rules.yaml")
 _NAMED_SECTIONS = ("standards", "interfaces", "entity_types", "relation_types", "provenance")
-_RULE_LISTS = ("opposites", "single_valued")
+_RULE_LISTS = ("opposites", "single_valued", "source_authority")
 
 
 class OntologyMergeError(ValueError):

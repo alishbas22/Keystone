@@ -10,10 +10,26 @@
 #                 per: target  -> each target has one source  (a customer has one account manager)
 #                 Two claims naming different values at the same time contradict each other.
 #
-# How a contradiction is RESOLVED (newer claim, source authority, corroboration) is decided by
-# the truth engine, not here.
+#   source_authority  Kinds of source, most trusted first. Used by the truth engine when two
+#                 contradicting claims have the same date: e.g. a signed contract beats an email.
+#
+# The truth engine resolves contradictions in this order: a person's decision, time (newer
+# wins), source authority, corroboration (more independent documents), else "disputed".
 
 rules:
+  source_authority:
+    - contract     # signed agreements
+    - database     # systems of record (CRM, ERP, HR system)
+    - policy
+    - report       # formal reports and spreadsheets
+    - spreadsheet
+    - presentation
+    - memo
+    - document     # anything else written
+    - email
+    - chat
+    - agent        # facts written back by AI agents
+
   opposites:
     - [likes, dislikes]
 

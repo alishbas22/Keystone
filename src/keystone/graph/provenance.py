@@ -18,6 +18,20 @@ from pydantic import BaseModel, Field
 SOURCE_LABEL = "KeystoneSource"
 PROVENANCE_REL = "HAS_PROVENANCE"
 
+# Words in a file name or title that reveal the kind of document, checked in order.
+_NAME_HINTS = [
+    ("contract", "contract"),
+    ("agreement", "contract"),
+    ("policy", "policy"),
+    ("report", "report"),
+    ("memo", "memo"),
+    ("minutes", "memo"),
+    ("chat", "chat"),
+    ("slack", "chat"),
+    ("teams", "chat"),
+]
+_SUFFIX_TYPES = {"xlsx": "spreadsheet", "csv": "spreadsheet", "pptx": "presentation"}
+
 
 class Provenance(BaseModel):
     """Where one stored section came from. Maps to the `provenance` fields in core.yaml."""
@@ -37,6 +51,22 @@ class Provenance(BaseModel):
     confidence: float = Field(default=0.8, ge=0, le=1)
     url: str | None = None
     kind: str = Field(default="document", description="document | database | agent")
+
+    @property
+    def source_type(self) -> str:
+        """Kind of source, for the authority rule in rules.yaml (contract, email, chat...)."""
+        if self.kind in ("database", "agent"):
+            return self.kind
+        name = f"{self.file or ''} {self.title}".lower()
+        suffix = (
+            (self.file or "").lower().rsplit(".", 1)[-1] if self.file and "." in self.file else ""
+        )
+        if suffix in ("eml", "msg"):
+            return "email"
+        for word, kind in _NAME_HINTS:
+            if word in name:
+                return kind
+        return _SUFFIX_TYPES.get(suffix, "document")
 
     @property
     def location(self) -> str:

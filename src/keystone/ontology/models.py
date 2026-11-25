@@ -117,6 +117,21 @@ class Triple(NamedTuple):
 class RelationRules(_Strict):
     opposites: list[tuple[str, str]] = []
     single_valued: list[SingleValuedRule] = []
+    source_authority: list[str] = Field(default=[], description="Source kinds, most trusted first.")
+
+    def authority_rank(self, source_type: str) -> int:
+        """0 = most trusted. Unknown kinds rank below every listed kind."""
+        try:
+            return self.source_authority.index(source_type)
+        except ValueError:
+            return len(self.source_authority)
+
+    @property
+    def relations_with_rules(self) -> set[str]:
+        """Relations that can contradict each other (opposites or single-valued)."""
+        return {r for pair in self.opposites for r in pair} | {
+            r.relation for r in self.single_valued
+        }
 
     def opposite_of(self, relation: str) -> str | None:
         for a, b in self.opposites:

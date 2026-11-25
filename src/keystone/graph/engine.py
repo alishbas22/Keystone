@@ -39,6 +39,33 @@ GEMINI_DEFAULTS = {
 }
 
 
+_TRANSIENT_MARKERS = {
+    "503": "Provider busy",
+    "unavailable": "Provider busy",
+    "high demand": "Provider busy",
+    "overloaded": "Provider busy",
+    "timed out": "Provider timeout",
+    "timeout": "Provider timeout",
+}
+
+
+def transient_problem(exc: BaseException) -> str | None:
+    """A short label if the error is temporary (rate limit, overload, timeout), else None.
+
+    Graphiti wraps provider errors, so the whole cause chain is checked.
+    """
+    seen: BaseException | None = exc
+    while seen is not None:
+        if isinstance(seen, RateLimitError):
+            return "Rate limit reached"
+        text = str(seen).lower()
+        for marker, label in _TRANSIENT_MARKERS.items():
+            if marker in text:
+                return label
+        seen = seen.__cause__ or seen.__context__
+    return None
+
+
 def make_graphiti(settings: Settings | None = None) -> Graphiti:
     """A Graphiti client for the configured LLM provider (Gemini or OpenAI)."""
     settings = settings or get_settings()
@@ -168,13 +195,14 @@ class KeystoneGraph:
                     **self.schema.add_episode_kwargs(),
                 )
                 break
-            except RateLimitError:
+            except Exception as exc:
+                problem = transient_problem(exc)
                 attempt += 1
-                if attempt > self.settings.rate_limit_retries:
+                if problem is None or attempt > self.settings.rate_limit_retries:
                     raise
                 wait = self.settings.rate_limit_wait_seconds * 2 ** (attempt - 1)
                 if progress:
-                    progress(f"Rate limit reached; waiting {wait:.0f}s (retry {attempt})")
+                    progress(f"{problem}; waiting {wait:.0f}s (retry {attempt})")
                 await asyncio.sleep(wait)
         await self.record_provenance(result.episode.uuid, provenance)
         return result
@@ -255,8 +283,11 @@ class KeystoneGraph:
     async def delete_all(self) -> None:
         """Delete everything in this Keystone graph (Graphiti data and provenance)."""
         await clear_data(self.graphiti.driver, group_ids=[self.group])
+        # Keystone's own nodes: provenance and reviewers' decisions.
         await self.query(
-            f"MATCH (s:{SOURCE_LABEL} {{group_id: $group}}) DETACH DELETE s", group=self.group
+            "MATCH (s) WHERE s.group_id = $group AND any(label IN labels(s) "
+            "WHERE label STARTS WITH 'Keystone') DETACH DELETE s",
+            group=self.group,
         )
 
 
