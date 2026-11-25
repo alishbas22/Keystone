@@ -29,6 +29,26 @@ def test_documents_page_lists_stored_documents(monkeypatch: pytest.MonkeyPatch) 
         assert any(t.label == "Upload files" for t in app.tabs)
 
 
+def test_explorer_shows_profile_and_respects_view_as(monkeypatch: pytest.MonkeyPatch) -> None:
+    with seeded_ui(monkeypatch):
+        app = run_page("explorer.py")
+        no_errors(app)
+        app.text_input[0].set_value("Sara").run()
+        no_errors(app)
+        assert app.header[0].value == "Sara Khan"
+        assert [m.value for m in app.metric][:1] == ["Person"]
+        timeline = app.dataframe[0].value
+        assert set(timeline["fact"]) == {
+            "Sara Khan manages account Harbor Hotels Group",
+            "Sara Khan reports to Omar Siddiqui",
+        }
+        # As a Sales-only agent, the HR reporting line disappears.
+        app.multiselect[0].set_value(["Sales"]).run()
+        assert set(app.dataframe[0].value["fact"]) == {
+            "Sara Khan manages account Harbor Hotels Group"
+        }
+
+
 def test_home_page_loads(monkeypatch: pytest.MonkeyPatch) -> None:
     with seeded_ui(monkeypatch):
         app = run_page("home.py")
