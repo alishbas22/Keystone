@@ -67,6 +67,25 @@ def test_conflict_review_and_decision(monkeypatch: pytest.MonkeyPatch) -> None:
         assert "decided by time" in app.expander[0].label
 
 
+def test_access_page_agents_audit_and_coverage(monkeypatch: pytest.MonkeyPatch) -> None:
+    with seeded_ui(monkeypatch):
+        app = run_page("access.py")
+        no_errors(app)
+        # Coverage: every fixture entity and fact is tagged with a business function.
+        assert any("Every entity and fact is tagged" in s.value for s in app.success)
+        coverage = {m.label: m.value for m in app.metric}
+        assert coverage["Sales"] == "4 entities" and coverage["HR"] == "2 entities"
+
+        # Create an agent: the key is shown once.
+        name_input = next(t for t in app.text_input if t.label == "Agent name")
+        name_input.set_value("sales-bot")
+        next(m for m in app.multiselect if m.label == "Business functions").set_value(["Sales"])
+        next(b for b in app.button if b.label == "Create agent key").click().run()
+        no_errors(app)
+        assert app.code[0].value.startswith("ks_")
+        assert any("**sales-bot**" in md.value for md in app.markdown)
+
+
 def test_home_page_loads(monkeypatch: pytest.MonkeyPatch) -> None:
     with seeded_ui(monkeypatch):
         app = run_page("home.py")
