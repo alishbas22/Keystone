@@ -24,6 +24,8 @@ dependencies = [
     "torchvision>=0.29",
     "sqlalchemy>=2.0,<3",
     "psycopg[binary]>=3.2,<4",
+    "rapidfuzz>=3.10,<4",
+    "mcp>=2.3,<3",
 ]
 
 # Built-in connectors register the same way third-party connector packages do.
