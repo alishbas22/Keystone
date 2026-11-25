@@ -11,7 +11,12 @@ from graphiti_core.llm_client.errors import RateLimitError
 from keystone.config import Settings
 from keystone.connectors import Document
 from keystone.connectors.folder import FolderConnector
-from keystone.graph.engine import KeystoneGraph, MissingApiKeyError, make_graphiti
+from keystone.graph.engine import (
+    KeystoneGraph,
+    MissingApiKeyError,
+    make_graphiti,
+    transient_problem,
+)
 from keystone.graph.provenance import Provenance
 from keystone.ingest.pipeline import (
     ingest_document,
@@ -188,6 +193,18 @@ async def test_rate_limits_are_retried() -> None:
         "Rate limit reached; waiting 0s (retry 1)",
         "Rate limit reached; waiting 0s (retry 2)",
     ]
+
+
+def test_transient_problems_are_recognised_through_wrapping() -> None:
+    try:
+        try:
+            raise RuntimeError("503 UNAVAILABLE. This model is experiencing high demand.")
+        except RuntimeError as inner:
+            raise Exception() from inner  # how Graphiti wraps provider errors
+    except Exception as outer:
+        assert transient_problem(outer) == "Provider busy"
+    assert transient_problem(RateLimitError()) == "Rate limit reached"
+    assert transient_problem(ValueError("invalid schema")) is None
 
 
 async def test_rate_limit_gives_up_after_the_retries() -> None:

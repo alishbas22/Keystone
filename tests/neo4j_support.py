@@ -64,5 +64,6 @@ def provenance(
         "section": section,
         "observed_at": datetime(2026, 9, 15, tzinfo=UTC),
         "business_function": function,
+        "author": "Test Author",
     }
     return Provenance.model_validate({**fields, **extra})

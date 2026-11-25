@@ -1,0 +1,185 @@
+"""Keystone MCP server (KAN-27): the knowledge graph as tools for any MCP-capable agent.
+
+Every tool reads through keystone.graph.queries with the calling agent's scope, so results are
+filtered by business function inside the database before the agent sees them.
+
+Run:
+    uv run python -m keystone.mcp_server                      # stdio (one local agent)
+    uv run python -m keystone.mcp_server --http --port 8765    # HTTP (many agents, shared memory)
+"""
+
+import dataclasses
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from datetime import date, datetime
+from typing import Any
+
+from mcp.server.mcpserver import MCPServer
+
+from keystone import __version__
+from keystone.graph import queries
+from keystone.graph.engine import KeystoneGraph, open_graph
+from keystone.mcp_server.auth import AgentIdentity, current_agent
+from keystone.ontology import Ontology
+
+INSTRUCTIONS = """\
+Keystone is a company knowledge graph built from documents, emails and databases, mapped onto a
+standard business ontology. Every fact has a source, a date and a status:
+current (true now), history (ended), superseded (lost to a newer or more authoritative source) or
+disputed (contradicted, unresolved).
+
+How to use it:
+1. describe_ontology to learn the entity types and relations.
+2. search_entities to find an entity's uuid by name.
+3. get_entity / get_relationships for facts; find_path to see how two entities are linked.
+4. get_conflicts to see contradictions; explain_claim to cite a fact's source documents.
+Base answers on current facts and cite their sources. Mention when something changed over time.
+You only see data for the business functions your agent key allows."""
+
+
+def to_json(value: Any) -> Any:
+    """Dataclasses, dates and containers -> JSON-friendly values."""
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {k: to_json(v) for k, v in dataclasses.asdict(value).items()}
+    if isinstance(value, datetime | date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(k): to_json(v) for k, v in value.items()}
+    if isinstance(value, list | tuple | set):
+        return [to_json(v) for v in value]
+    return value
+
+
+def describe(ontology: Ontology) -> dict[str, Any]:
+    """The ontology in a compact form an agent can plan with."""
+    return {
+        "business_functions": ontology.business_functions,
+        "packs": [p.name for p in ontology.packs],
+        "entity_types": {
+            name: {
+                "description": e.description,
+                "standard": e.maps_to,
+                "interfaces": e.implements,
+                "properties": {p: prop.description for p, prop in e.properties.items()},
+            }
+            for name, e in ontology.entity_types.items()
+        },
+        "interfaces": {
+            name: {"description": i.description, "implemented_by": ontology.implementers(name)}
+            for name, i in ontology.interfaces.items()
+        },
+        "relations": {
+            name: {
+                "description": r.description,
+                "from": ontology.concrete_types(r.source),
+                "to": ontology.concrete_types(r.target),
+                "properties": {p: prop.description for p, prop in r.properties.items()},
+            }
+            for name, r in ontology.relation_types.items()
+        },
+        "rules": {
+            "opposites": [list(pair) for pair in ontology.rules.opposites],
+            "single_valued": [
+                {"relation": r.relation, "per": r.per, "meaning": r.description}
+                for r in ontology.rules.single_valued
+            ],
+            "source_authority_most_trusted_first": ontology.rules.source_authority,
+        },
+    }
+
+
+class _State:
+    graph: KeystoneGraph | None = None
+
+
+def create_server(graph: KeystoneGraph | None = None) -> MCPServer:
+    """Build the server. Pass `graph` in tests; otherwise one is opened at startup."""
+    state = _State()
+    state.graph = graph
+
+    @asynccontextmanager
+    async def lifespan(_: MCPServer) -> AsyncIterator[None]:
+        if state.graph is not None:
+            yield
+            return
+        async with open_graph() as opened:
+            await opened.setup()
+            state.graph = opened
+            try:
+                yield
+            finally:
+                state.graph = None
+
+    server = MCPServer(
+        name="keystone",
+        title="Keystone business knowledge graph",
+        version=__version__,
+        instructions=INSTRUCTIONS,
+        lifespan=lifespan,
+    )
+
+    def ready() -> tuple[KeystoneGraph, AgentIdentity]:
+        assert state.graph is not None, "graph not open"
+        return state.graph, current_agent(state.graph.ontology)
+
+    @server.tool()
+    async def search_entities(query: str, limit: int = 10) -> dict[str, Any]:
+        """Find people, organisations, products, orders and other entities by name or alias.
+
+        Returns uuids to use with get_entity, get_relationships and find_path.
+        """
+        graph, agent = ready()
+        found = await queries.search_entities(graph, query, agent.scope, max(1, min(limit, 50)))
+        return {"results": to_json(found)}
+
+    @server.tool()
+    async def get_entity(uuid: str) -> dict[str, Any]:
+        """Full profile of an entity: type, properties, aliases, current facts and past facts
+        (history, superseded or disputed), each with its sources."""
+        graph, agent = ready()
+        profile = await queries.get_entity(graph, uuid, agent.scope)
+        return to_json(profile) if profile else {"error": "not found or not visible to this agent"}
+
+    @server.tool()
+    async def get_relationships(uuid: str, relation: str | None = None) -> dict[str, Any]:
+        """Every fact connecting an entity to others, optionally only one relation type
+        (e.g. "manages_account"). Includes status and sources."""
+        graph, agent = ready()
+        facts = await queries.get_relationships(graph, uuid, agent.scope, relation)
+        return {"facts": to_json(facts)}
+
+    @server.tool()
+    async def find_path(from_uuid: str, to_uuid: str, max_hops: int = 4) -> dict[str, Any]:
+        """The shortest chain of facts linking two entities (up to max_hops, at most 6)."""
+        graph, agent = ready()
+        path = await queries.find_path(graph, from_uuid, to_uuid, agent.scope, max_hops)
+        return {"path": to_json(path), "found": bool(path)}
+
+    @server.tool()
+    async def get_conflicts(only_open: bool = False) -> dict[str, Any]:
+        """Contradictions between facts (e.g. two different account managers for one customer),
+        with the rule that resolved each one: person, time, source authority, corroboration,
+        or none (still disputed)."""
+        graph, agent = ready()
+        conflicts = await queries.get_conflicts(graph, agent.scope, include_resolved=not only_open)
+        return {
+            "conflicts": [{**to_json(c), "open": c.open} for c in conflicts],
+            "open": sum(1 for c in conflicts if c.open),
+        }
+
+    @server.tool()
+    async def explain_claim(fact_id: str) -> dict[str, Any]:
+        """Where a fact came from: source documents, sections, pages, authors, dates,
+        confidence, plus its status and any contradicting facts. Use it to cite answers."""
+        graph, agent = ready()
+        fact = await queries.explain_claim(graph, fact_id, agent.scope)
+        return to_json(fact) if fact else {"error": "not found or not visible to this agent"}
+
+    @server.tool()
+    async def describe_ontology() -> dict[str, Any]:
+        """The business concepts (entity types, relations, interfaces) and contradiction rules,
+        plus which business functions this agent can see. Call this first to plan queries."""
+        graph, agent = ready()
+        return {**describe(graph.ontology), "your_access": to_json(agent)}
+
+    return server
