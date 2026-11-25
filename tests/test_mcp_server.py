@@ -9,6 +9,7 @@ import pytest_asyncio
 from mcp import Client
 
 from keystone.graph.engine import KeystoneGraph
+from keystone.mcp_server.auth import AgentIdentity
 from keystone.mcp_server.server import create_server
 from tests.graph_fixtures import Brightline, build_brightline
 from tests.neo4j_support import open_test_graph
@@ -26,7 +27,8 @@ async def connect(
 ) -> AsyncIterator[tuple[Client, Brightline]]:
     """The client is opened inside the test's own task (anyio cancel scopes require it)."""
     graph, data = world
-    async with Client(create_server(graph)) as client:
+    everything = AgentIdentity("admin-test", list(graph.ontology.business_functions))
+    async with Client(create_server(graph, agent=everything)) as client:
         yield client, data
 
 
@@ -44,7 +46,7 @@ async def test_lists_the_tools(world: tuple[KeystoneGraph, Brightline]) -> None:
         tools = {t.name for t in (await client.list_tools()).tools}
         assert tools == {
             "search_entities", "get_entity", "get_relationships", "find_path",
-            "get_conflicts", "explain_claim", "describe_ontology",
+            "get_conflicts", "explain_claim", "describe_ontology", "add_claim",
         }  # fmt: skip
 
 

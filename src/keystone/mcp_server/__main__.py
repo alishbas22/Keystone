@@ -19,7 +19,8 @@ def main() -> None:
     configure_network()
     from keystone.mcp_server.server import create_server
 
-    server = create_server()
+    http_url = f"http://{args.host}:{args.port}" if args.http else None
+    server = create_server(http_url=http_url)
     if args.http:
         server.run("streamable-http", host=args.host, port=args.port)
     else:

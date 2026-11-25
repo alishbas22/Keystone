@@ -9,18 +9,42 @@ Run:
 """
 
 import dataclasses
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 from typing import Any
 
+from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 from keystone import __version__
-from keystone.graph import queries
+from keystone.graph import claims, queries
 from keystone.graph.engine import KeystoneGraph, open_graph
-from keystone.mcp_server.auth import AgentIdentity, current_agent
+from keystone.mcp_server.auth import (
+    AccessDenied,
+    AgentIdentity,
+    AgentRegistry,
+    KeystoneTokenVerifier,
+    current_agent,
+)
 from keystone.ontology import Ontology
+
+AGENT_KEY_ENV = "KEYSTONE_AGENT_KEY"
+
+
+async def _stdio_agent(registry: AgentRegistry) -> AgentIdentity:
+    """The single agent of a stdio server, from the KEYSTONE_AGENT_KEY environment variable."""
+    key = os.environ.get(AGENT_KEY_ENV, "")
+    agent = await registry.verify(key) if key else None
+    if agent is None:
+        raise AccessDenied(
+            f"{AGENT_KEY_ENV} is missing or not a valid agent key. Create one with "
+            f"`python -m keystone.mcp_server.agents create <name> --functions Sales`."
+        )
+    return agent
+
 
 INSTRUCTIONS = """\
 Keystone is a company knowledge graph built from documents, emails and databases, mapped onto a
@@ -33,6 +57,7 @@ How to use it:
 2. search_entities to find an entity's uuid by name.
 3. get_entity / get_relationships for facts; find_path to see how two entities are linked.
 4. get_conflicts to see contradictions; explain_claim to cite a fact's source documents.
+5. add_claim to store something you learned; other agents with access will see it.
 Base answers on current facts and cite their sources. Mention when something changed over time.
 You only see data for the business functions your agent key allows."""
 
@@ -90,37 +115,66 @@ def describe(ontology: Ontology) -> dict[str, Any]:
 
 class _State:
     graph: KeystoneGraph | None = None
+    agent: AgentIdentity | None = None
 
 
-def create_server(graph: KeystoneGraph | None = None) -> MCPServer:
-    """Build the server. Pass `graph` in tests; otherwise one is opened at startup."""
+def create_server(
+    graph: KeystoneGraph | None = None,
+    agent: AgentIdentity | None = None,
+    http_url: str | None = None,
+) -> MCPServer:
+    """Build the server.
+
+    - stdio: the agent comes from KEYSTONE_AGENT_KEY (checked at startup), or `agent` in tests.
+    - HTTP (`http_url`, e.g. "http://127.0.0.1:8765"): every request must carry an agent key
+      as a bearer token; each agent sees only its business functions.
+    """
     state = _State()
-    state.graph = graph
+    state.graph, state.agent = graph, agent
+    verifier = KeystoneTokenVerifier()
 
     @asynccontextmanager
     async def lifespan(_: MCPServer) -> AsyncIterator[None]:
         if state.graph is not None:
+            verifier.registry = AgentRegistry(state.graph)
             yield
             return
         async with open_graph() as opened:
             await opened.setup()
             state.graph = opened
+            verifier.registry = AgentRegistry(opened)
+            if http_url is None and state.agent is None:
+                state.agent = await _stdio_agent(verifier.registry)
             try:
                 yield
             finally:
                 state.graph = None
 
+    auth = (
+        AuthSettings(
+            issuer_url=http_url,  # type: ignore[arg-type]
+            resource_server_url=f"{http_url}/mcp",  # type: ignore[arg-type]
+            validate_token_resource=False,  # agent keys are issued by Keystone for this server only
+        )
+        if http_url
+        else None
+    )
     server = MCPServer(
         name="keystone",
         title="Keystone business knowledge graph",
         version=__version__,
         instructions=INSTRUCTIONS,
         lifespan=lifespan,
+        token_verifier=verifier if http_url else None,
+        auth=auth,
     )
 
     def ready() -> tuple[KeystoneGraph, AgentIdentity]:
         assert state.graph is not None, "graph not open"
-        return state.graph, current_agent(state.graph.ontology)
+        try:
+            return state.graph, current_agent(state.graph.ontology, state.agent)
+        except AccessDenied as exc:
+            raise ToolError(f"Access denied: {exc}") from exc  # shown to the agent
 
     @server.tool()
     async def search_entities(query: str, limit: int = 10) -> dict[str, Any]:
@@ -174,6 +228,35 @@ def create_server(graph: KeystoneGraph | None = None) -> MCPServer:
         graph, agent = ready()
         fact = await queries.explain_claim(graph, fact_id, agent.scope)
         return to_json(fact) if fact else {"error": "not found or not visible to this agent"}
+
+    @server.tool()
+    async def add_claim(
+        subject: str,
+        relation: str,
+        object: str,
+        details: str = "",
+        business_function: str | None = None,
+    ) -> dict[str, Any]:
+        """Store something you learned, e.g. subject="Daniel Price", relation="works_for",
+        object="Harbor Hotels Group". `relation` must be an ontology relation (see
+        describe_ontology); `details` is optional context. The claim is attributed to you,
+        dated now, and visible to other agents with access to the business function (default:
+        your first one). Returns the stored facts and any existing facts they contradict."""
+        graph, agent = ready()
+        try:
+            result = await claims.add_claim(
+                graph,
+                agent.name,
+                agent.scope,
+                subject,
+                relation,
+                object,
+                details,
+                business_function,
+            )
+        except claims.ClaimRejected as exc:
+            return {"stored": False, "error": str(exc)}
+        return {"stored": True, **to_json(result)}
 
     @server.tool()
     async def describe_ontology() -> dict[str, Any]:
