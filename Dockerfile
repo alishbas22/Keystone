@@ -18,6 +18,7 @@ RUN uv sync --locked --no-dev --no-install-project
 # 2) Install Keystone itself
 COPY README.md LICENSE ./
 COPY src ./src
+COPY ontology ./ontology
 RUN uv sync --locked --no-dev
 
 EXPOSE 8000

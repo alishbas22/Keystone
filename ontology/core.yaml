@@ -1,0 +1,307 @@
+# Keystone core business ontology (KAN-14)
+#
+# A shared, cross-industry vocabulary of business concepts. Every type and relation points to
+# an existing standard term (`maps_to`) instead of being invented from scratch:
+#   - Schema.org   : people, organisations, products, orders, invoices, places, events, documents
+#   - W3C ORG      : teams/departments, membership, roles, reporting lines
+#   - W3C PROV-O   : where each fact came from, who said it, and when (provenance)
+# A few business relations have no standard equivalent; they have no `maps_to` and are
+# Keystone's own terms.
+#
+# Design rules (Palantir Foundry ontology best practices, see CLAUDE.md section 8):
+#   - Model reality, not systems: "Order", not "tbl_orders".
+#   - Customer, supplier, employee are RELATIONSHIPS between parties, not separate types.
+#   - Entity properties hold stable identity facts only (order number, SKU, email).
+#     Things that change over time (status, job title, who manages whom) are relations or
+#     dated claims, so their history is kept.
+#   - Names are for humans: PascalCase for types, snake_case for relations and properties.
+#   - Descriptions are written for the LLM that extracts entities from documents.
+#
+# Industry packs (ontology/packs/) extend this file; they never modify it.
+
+name: keystone-core
+version: 0.1.0
+
+standards:
+  schema:
+    namespace: "https://schema.org/"
+    file: standards/schemaorg.ttl
+    title: Schema.org
+  org:
+    namespace: "http://www.w3.org/ns/org#"
+    file: standards/org.ttl
+    title: W3C Organization Ontology
+  prov:
+    namespace: "http://www.w3.org/ns/prov#"
+    file: standards/prov-o.ttl
+    title: W3C PROV-O
+
+# Every node and edge is tagged with one of these at ingestion; agents are scoped to them.
+business_functions: [Sales, Finance, HR, Operations]
+
+# ---------------------------------------------------------------------------------------------
+# Entity types: the kinds of real-world things a business talks about.
+# Property `identity: true` means the value uniquely identifies the thing (used for merging
+# duplicates: two products with the same SKU are the same product).
+# ---------------------------------------------------------------------------------------------
+entity_types:
+  Person:
+    description: >-
+      An individual human being, such as an employee, a customer contact, a supplier contact
+      or a manager. Not a company, team or job title.
+    maps_to: schema:Person
+    see_also: [prov:Person]
+    properties:
+      email: {type: email, maps_to: schema:email, identity: true, description: 'Work or personal email address.'}
+      phone: {type: string, maps_to: schema:telephone, description: 'Telephone number.'}
+
+  Organization:
+    description: >-
+      A company, business, government body, charity or other organisation as a whole, such
+      as our own company, a customer company, a supplier or a bank. For teams and departments
+      inside an organisation use OrganizationalUnit.
+    maps_to: schema:Organization
+    see_also: [org:Organization, prov:Organization]
+    properties:
+      legal_name: {type: string, maps_to: schema:legalName, description: 'Official registered name.'}
+      tax_id: {type: string, maps_to: schema:taxID, identity: true, description: 'Tax or company registration number.'}
+      website: {type: url, maps_to: schema:url, description: 'Main website address.'}
+      industry_code: {type: string, maps_to: schema:naics, description: 'NAICS industry classification code.'}
+
+  OrganizationalUnit:
+    description: >-
+      A team, department, division or business unit that is part of an organisation, such as
+      "Sales team", "Finance department" or "EMEA division". It cannot exist on its own.
+    maps_to: org:OrganizationalUnit
+    properties: {}
+
+  Product:
+    description: >-
+      A good or service that is made, bought or sold, such as "Ergo Desk Chair" or "Annual
+      support plan". Not an individual order line.
+    maps_to: schema:Product
+    properties:
+      sku: {type: string, maps_to: schema:sku, identity: true, description: 'Stock keeping unit code.'}
+      gtin: {type: string, maps_to: schema:gtin, identity: true, description: 'Global trade item number (barcode).'}
+      category: {type: string, maps_to: schema:category, description: 'Product category, e.g. "Furniture".'}
+
+  Order:
+    description: >-
+      A confirmed request by a customer to buy products or services, usually with an order
+      number and date, such as purchase order "PO-1042".
+    maps_to: schema:Order
+    properties:
+      order_number: {type: string, maps_to: schema:orderNumber, identity: true, description: 'Order or purchase order number.'}
+      order_date: {type: date, maps_to: schema:orderDate, description: 'Date the order was placed.'}
+      total_amount: {type: number, description: 'Total order value.'}
+      currency: {type: string, description: 'ISO 4217 currency code, e.g. "USD".'}
+
+  Invoice:
+    description: >-
+      A bill requesting payment for goods or services, such as invoice "INV-2025-001".
+    maps_to: schema:Invoice
+    properties:
+      invoice_number: {type: string, maps_to: schema:identifier, identity: true, description: 'Invoice number.'}
+      issue_date: {type: date, description: 'Date the invoice was issued.'}
+      payment_due_date: {type: date, maps_to: schema:paymentDueDate, description: 'Date payment is due.'}
+      total_amount: {type: number, maps_to: schema:totalPaymentDue, description: 'Total amount to pay.'}
+      currency: {type: string, description: 'ISO 4217 currency code, e.g. "USD".'}
+
+  Place:
+    description: >-
+      A physical location such as an office, store, warehouse, city or country.
+    maps_to: schema:Place
+    properties:
+      address: {type: text, maps_to: schema:address, description: 'Street address.'}
+      country: {type: string, maps_to: schema:addressCountry, description: 'Country name or ISO code.'}
+
+  Event:
+    description: >-
+      Something that happens at a specific time, such as a meeting, conference, product launch
+      or review.
+    maps_to: schema:Event
+    properties:
+      start_date: {type: datetime, maps_to: schema:startDate, description: 'When the event starts.'}
+      end_date: {type: datetime, maps_to: schema:endDate, description: 'When the event ends.'}
+
+  Document:
+    description: >-
+      A business document referred to in the text, such as a contract, policy, report, email,
+      presentation or meeting minutes, e.g. "the 2025 supply agreement".
+    maps_to: schema:DigitalDocument
+    see_also: [prov:Entity]
+    properties:
+      title: {type: string, maps_to: schema:headline, description: 'Document title.'}
+      document_type: {type: string, description: 'Kind of document, e.g. contract, policy, report, email, minutes.'}
+      date_created: {type: date, maps_to: schema:dateCreated, description: 'Date the document was written.'}
+      url: {type: url, maps_to: schema:url, description: 'Where the document can be found.'}
+
+# ---------------------------------------------------------------------------------------------
+# Relation types: real relationships between things (not join keys).
+# Graphiti gives every relation a validity window (valid from / until), so changes over time
+# are kept as history. `inverse: true` means the standard term points the other way.
+# ---------------------------------------------------------------------------------------------
+relation_types:
+  # --- People and organisations (W3C ORG / Schema.org) ---
+  works_for:
+    description: A person is employed by or works for an organisation.
+    source: [Person]
+    target: [Organization]
+    maps_to: schema:worksFor
+
+  member_of:
+    description: A person is a member of a team, department or organisation, optionally in a role.
+    source: [Person]
+    target: [OrganizationalUnit, Organization]
+    maps_to: org:memberOf
+    properties:
+      role: {type: string, maps_to: org:role, description: 'Job title or role held, e.g. "Account Manager".'}
+
+  head_of:
+    description: A person leads or is head of a team, department or organisation.
+    source: [Person]
+    target: [OrganizationalUnit, Organization]
+    maps_to: org:headOf
+
+  reports_to:
+    description: A person reports to another person (their manager) in the reporting line.
+    source: [Person]
+    target: [Person]
+    maps_to: org:reportsTo
+
+  unit_of:
+    description: A team or department is part of a larger organisation or unit.
+    source: [OrganizationalUnit]
+    target: [Organization, OrganizationalUnit]
+    maps_to: org:unitOf
+
+  subsidiary_of:
+    description: An organisation is owned by or is a subsidiary of a parent organisation.
+    source: [Organization]
+    target: [Organization]
+    maps_to: schema:parentOrganization
+
+  knows:
+    description: A person knows another person.
+    source: [Person]
+    target: [Person]
+    maps_to: schema:knows
+
+  # --- Commercial relationships (Keystone terms, no exact standard equivalent) ---
+  customer_of:
+    description: A person or organisation is a customer of (buys from) an organisation.
+    source: [Person, Organization]
+    target: [Organization]
+
+  manages_account:
+    description: A person is the account manager or main contact responsible for a customer.
+    source: [Person]
+    target: [Person, Organization]
+
+  # --- Orders, invoices and products (Schema.org) ---
+  placed_by:
+    description: An order was placed by a person or organisation (the buyer).
+    source: [Order]
+    target: [Person, Organization]
+    maps_to: schema:customer
+
+  sold_by:
+    description: An order was sold or fulfilled by an organisation (the seller).
+    source: [Order]
+    target: [Organization]
+    maps_to: schema:seller
+
+  contains_product:
+    description: An order includes a product.
+    source: [Order]
+    target: [Product]
+    maps_to: schema:orderedItem
+    properties:
+      quantity: {type: number, maps_to: schema:orderQuantity, description: 'Number of units ordered.'}
+
+  invoice_for:
+    description: An invoice bills for an order.
+    source: [Invoice]
+    target: [Order]
+    maps_to: schema:referencesOrder
+
+  billed_to:
+    description: An invoice is addressed to the person or organisation who must pay it.
+    source: [Invoice]
+    target: [Person, Organization]
+    maps_to: schema:customer
+
+  issued_by:
+    description: An invoice was issued by an organisation (the party to be paid).
+    source: [Invoice]
+    target: [Organization]
+    maps_to: schema:provider
+
+  manufactured_by:
+    description: A product is made by an organisation.
+    source: [Product]
+    target: [Organization]
+    maps_to: schema:manufacturer
+
+  # --- Places, events, documents ---
+  located_in:
+    description: An organisation, team, event or place is located in a place.
+    source: [Organization, OrganizationalUnit, Event, Place]
+    target: [Place]
+    maps_to: schema:location
+
+  attended:
+    description: A person attended or took part in an event.
+    source: [Person]
+    target: [Event]
+    maps_to: schema:attendee
+    inverse: true
+
+  written_by:
+    description: A document was written or authored by a person or organisation.
+    source: [Document]
+    target: [Person, Organization]
+    maps_to: schema:author
+
+  # --- Sentiment (used for the contradiction example: likes vs dislikes) ---
+  likes:
+    description: A person or organisation has a positive view of, or good relationship with, someone or something.
+    source: [Person, Organization]
+    target: [Person, Organization, Product]
+
+  dislikes:
+    description: A person or organisation has a negative view of, or bad relationship with, someone or something.
+    source: [Person, Organization]
+    target: [Person, Organization, Product]
+
+# ---------------------------------------------------------------------------------------------
+# Provenance: metadata stored on EVERY claim (PROV-O). "Every fact has a source."
+# ---------------------------------------------------------------------------------------------
+provenance:
+  source:
+    type: string
+    required: true
+    maps_to: prov:wasDerivedFrom
+    description: The document, database row or system the claim was taken from.
+  source_location:
+    type: string
+    required: false
+    description: Where inside the source, e.g. "page 3, section 2.1" (from Docling).
+  author:
+    type: string
+    required: true
+    maps_to: prov:wasAttributedTo
+    description: The person, system or agent responsible for the claim.
+  observed_at:
+    type: datetime
+    required: true
+    maps_to: prov:generatedAtTime
+    description: When the claim was made or recorded (not when it was ingested).
+  confidence:
+    type: number
+    required: true
+    description: Extraction confidence between 0 and 1.
+  business_function:
+    type: string
+    required: true
+    description: Business function that owns the claim (one of business_functions); controls which agents can see it.
