@@ -21,9 +21,14 @@ class Settings(BaseSettings):
         default=SecretStr(""), validation_alias=AliasChoices("GEMINI_API_KEY", "GOOGLE_API_KEY")
     )
     openai_api_key: SecretStr = SecretStr("")
-    llm_model: str | None = None  # None = Graphiti's default for the provider
+    llm_model: str | None = None  # None = Keystone's tested default for the provider
     llm_small_model: str | None = None
     embedding_model: str | None = None
+    # Parallel LLM calls per section. Low values avoid free-tier rate limits; raise on paid plans.
+    llm_max_concurrency: int = Field(default=2, ge=1, le=50)
+    # When the provider says "rate limit exceeded": retries per section, with growing waits.
+    rate_limit_retries: int = Field(default=5, ge=0, le=10)
+    rate_limit_wait_seconds: float = Field(default=30, ge=0)
 
     # Industry packs loaded on top of the core ontology (files in ontology/packs/).
     # In .env: ONTOLOGY_PACKS=["retail"]

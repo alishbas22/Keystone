@@ -104,7 +104,7 @@ async def ingest_document(
             kind=kind,
         )
         body = f"Document: {parsed.title}\nSection: {section.heading}\n\n{section.text}"
-        await graph.add_section(provenance, body)
+        await graph.add_section(provenance, body, progress)
     return IngestResult(document.id, parsed.title, "ingested", sections=total)
 
 

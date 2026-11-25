@@ -6,7 +6,8 @@ keeps validity dates on every fact. Keystone adds a provenance record to every e
 provenance.py), so each fact traces back to a source, author, date and business function.
 """
 
-from collections.abc import AsyncIterator
+import asyncio
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -14,6 +15,7 @@ from datetime import UTC, datetime
 from graphiti_core import Graphiti
 from graphiti_core.graphiti import AddEpisodeResults
 from graphiti_core.llm_client.config import LLMConfig
+from graphiti_core.llm_client.errors import RateLimitError
 from graphiti_core.nodes import EpisodeType
 from graphiti_core.utils.maintenance.graph_data_operations import clear_data
 
@@ -27,15 +29,22 @@ class MissingApiKeyError(RuntimeError):
     pass
 
 
+# Tested with a new Gemini API key (Nov 2026). Graphiti's built-in Gemini defaults
+# (gemini-3-flash-preview, gemini-2.5-flash-lite, text-embedding-001) are not available to new
+# keys, so Keystone sets its own. Override with LLM_MODEL, LLM_SMALL_MODEL, EMBEDDING_MODEL.
+GEMINI_DEFAULTS = {
+    "model": "gemini-3.5-flash",
+    "small_model": "gemini-3.5-flash-lite",
+    "embedding_model": "gemini-embedding-001",
+}
+
+
 def make_graphiti(settings: Settings | None = None) -> Graphiti:
     """A Graphiti client for the configured LLM provider (Gemini or OpenAI)."""
     settings = settings or get_settings()
     api_key = settings.api_key
     if not api_key:
         raise MissingApiKeyError(f"{settings.api_key_name} is not set. Add it to the .env file.")
-    llm_config = LLMConfig(
-        api_key=api_key, model=settings.llm_model, small_model=settings.llm_small_model
-    )
     uri, user = settings.neo4j_uri, settings.neo4j_user
     password = settings.neo4j_password.get_secret_value()
 
@@ -44,17 +53,28 @@ def make_graphiti(settings: Settings | None = None) -> Graphiti:
         from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
         from graphiti_core.llm_client.gemini_client import GeminiClient
 
-        gemini_embedder = GeminiEmbedderConfig(api_key=api_key)
-        if settings.embedding_model:
-            gemini_embedder.embedding_model = settings.embedding_model
+        model = settings.llm_model or GEMINI_DEFAULTS["model"]
+        small_model = settings.llm_small_model or GEMINI_DEFAULTS["small_model"]
+        embedding_model = settings.embedding_model or GEMINI_DEFAULTS["embedding_model"]
         return Graphiti(
             uri,
             user,
             password,
-            llm_client=GeminiClient(config=llm_config),
-            embedder=GeminiEmbedder(config=gemini_embedder),
-            cross_encoder=GeminiRerankerClient(config=LLMConfig(api_key=api_key)),
+            max_coroutines=settings.llm_max_concurrency,
+            llm_client=GeminiClient(
+                config=LLMConfig(api_key=api_key, model=model, small_model=small_model)
+            ),
+            embedder=GeminiEmbedder(
+                config=GeminiEmbedderConfig(api_key=api_key, embedding_model=embedding_model)
+            ),
+            cross_encoder=GeminiRerankerClient(
+                config=LLMConfig(api_key=api_key, model=small_model)
+            ),
         )
+
+    llm_config = LLMConfig(
+        api_key=api_key, model=settings.llm_model, small_model=settings.llm_small_model
+    )
 
     from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
     from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
@@ -67,6 +87,7 @@ def make_graphiti(settings: Settings | None = None) -> Graphiti:
         uri,
         user,
         password,
+        max_coroutines=settings.llm_max_concurrency,
         llm_client=OpenAIClient(config=llm_config),
         embedder=OpenAIEmbedder(config=openai_embedder),
         cross_encoder=OpenAIRerankerClient(config=LLMConfig(api_key=api_key)),
@@ -117,8 +138,14 @@ class KeystoneGraph:
             f"CREATE INDEX keystone_source_doc IF NOT EXISTS FOR (s:{SOURCE_LABEL}) ON (s.doc_id)"
         )
 
-    async def add_section(self, provenance: Provenance, body: str) -> AddEpisodeResults:
-        """Store one section: Graphiti extracts facts, Keystone records where they came from."""
+    async def add_section(
+        self, provenance: Provenance, body: str, progress: Callable[[str], None] | None = None
+    ) -> AddEpisodeResults:
+        """Store one section: Graphiti extracts facts, Keystone records where they came from.
+
+        On a provider rate limit the section is retried after a growing wait. Graphiti saves an
+        episode only after all its LLM calls succeed, so a retry never stores anything twice.
+        """
         if provenance.business_function not in self.ontology.business_functions:
             raise ValueError(
                 f"business_function must be one of {self.ontology.business_functions}, "
@@ -127,15 +154,28 @@ class KeystoneGraph:
         observed = provenance.observed_at
         if observed.tzinfo is None:
             observed = observed.replace(tzinfo=UTC)
-        result = await self.graphiti.add_episode(
-            name=f"{provenance.title} - {provenance.section}"[:200],
-            episode_body=body,
-            source_description=f"{provenance.location} ({provenance.business_function})",
-            reference_time=observed,
-            source=EpisodeType.text,
-            group_id=self.group,
-            **self.schema.add_episode_kwargs(),
-        )
+
+        attempt = 0
+        while True:
+            try:
+                result = await self.graphiti.add_episode(
+                    name=f"{provenance.title} - {provenance.section}"[:200],
+                    episode_body=body,
+                    source_description=f"{provenance.location} ({provenance.business_function})",
+                    reference_time=observed,
+                    source=EpisodeType.text,
+                    group_id=self.group,
+                    **self.schema.add_episode_kwargs(),
+                )
+                break
+            except RateLimitError:
+                attempt += 1
+                if attempt > self.settings.rate_limit_retries:
+                    raise
+                wait = self.settings.rate_limit_wait_seconds * 2 ** (attempt - 1)
+                if progress:
+                    progress(f"Rate limit reached; waiting {wait:.0f}s (retry {attempt})")
+                await asyncio.sleep(wait)
         await self.record_provenance(result.episode.uuid, provenance)
         return result
 

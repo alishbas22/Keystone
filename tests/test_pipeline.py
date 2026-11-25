@@ -2,14 +2,16 @@
 
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from graphiti_core.llm_client.errors import RateLimitError
 
 from keystone.config import Settings
 from keystone.connectors import Document
 from keystone.connectors.folder import FolderConnector
-from keystone.graph.engine import MissingApiKeyError, make_graphiti
+from keystone.graph.engine import KeystoneGraph, MissingApiKeyError, make_graphiti
 from keystone.graph.provenance import Provenance
 from keystone.ingest.pipeline import (
     ingest_document,
@@ -33,7 +35,7 @@ class FakeGraph:
     async def has_document(self, doc_id: str) -> bool:
         return any(p.doc_id == doc_id for p, _ in self.sections)
 
-    async def add_section(self, provenance: Provenance, body: str) -> Any:
+    async def add_section(self, provenance: Provenance, body: str, progress: Any = None) -> Any:
         self.sections.append((provenance, body))
 
 
@@ -140,6 +142,59 @@ def test_gemini_is_the_default_provider() -> None:
     assert type(graphiti.llm_client).__name__ == "GeminiClient"
     assert type(graphiti.embedder).__name__ == "GeminiEmbedder"
     assert type(graphiti.cross_encoder).__name__ == "GeminiRerankerClient"
+    # Keystone's tested model defaults, not Graphiti's retired ones
+    assert graphiti.llm_client.model == "gemini-3.5-flash"
+    assert graphiti.llm_client.small_model == "gemini-3.5-flash-lite"
+    assert graphiti.embedder.config.embedding_model == "gemini-embedding-001"  # type: ignore[attr-defined]
+
+
+class FlakyGraphiti:
+    """Hits the provider rate limit `failures` times, then succeeds."""
+
+    def __init__(self, failures: int) -> None:
+        self.failures = failures
+        self.calls = 0
+        self.driver = self
+
+    async def add_episode(self, **kwargs: Any) -> Any:
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise RateLimitError()
+        return SimpleNamespace(episode=SimpleNamespace(uuid="ep-1"))
+
+    async def execute_query(self, cypher: str, **params: Any) -> Any:
+        return [], None, None
+
+
+def flaky_graph(failures: int, retries: int) -> tuple[KeystoneGraph, FlakyGraphiti]:
+    graphiti = FlakyGraphiti(failures)
+    settings = Settings(rate_limit_retries=retries, rate_limit_wait_seconds=0)
+    return KeystoneGraph(graphiti, settings), graphiti  # type: ignore[arg-type]
+
+
+def a_provenance() -> Provenance:
+    return Provenance(
+        doc_id="d", document_id="x", source="s:x", title="t", observed_at=datetime.now(UTC),
+        business_function="Sales",
+    )  # fmt: skip
+
+
+async def test_rate_limits_are_retried() -> None:
+    graph, graphiti = flaky_graph(failures=2, retries=5)
+    messages: list[str] = []
+    result = await graph.add_section(a_provenance(), "text", messages.append)
+    assert result.episode.uuid == "ep-1" and graphiti.calls == 3
+    assert messages == [
+        "Rate limit reached; waiting 0s (retry 1)",
+        "Rate limit reached; waiting 0s (retry 2)",
+    ]
+
+
+async def test_rate_limit_gives_up_after_the_retries() -> None:
+    graph, graphiti = flaky_graph(failures=10, retries=2)
+    with pytest.raises(RateLimitError):
+        await graph.add_section(a_provenance(), "text")
+    assert graphiti.calls == 3
 
 
 def test_provenance_location() -> None:
