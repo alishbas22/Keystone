@@ -15,11 +15,11 @@ from datetime import UTC, datetime
 from graphiti_core import Graphiti
 from graphiti_core.graphiti import AddEpisodeResults
 from graphiti_core.llm_client.config import LLMConfig
-from graphiti_core.llm_client.errors import RateLimitError
 from graphiti_core.nodes import EpisodeType
 from graphiti_core.utils.maintenance.graph_data_operations import clear_data
 
 from keystone.config import Settings, get_settings
+from keystone.graph.pacing import RequestPacer, pace, transient_problem
 from keystone.graph.provenance import PROVENANCE_REL, SOURCE_LABEL, Provenance
 from keystone.ontology import Ontology, active_ontology, to_graphiti
 from keystone.ontology.to_graphiti import GraphitiSchema
@@ -41,36 +41,22 @@ GEMINI_DEFAULTS = {
 }
 
 
-_TRANSIENT_MARKERS = {
-    "503": "Provider busy",
-    "unavailable": "Provider busy",
-    "high demand": "Provider busy",
-    "overloaded": "Provider busy",
-    "timed out": "Provider timeout",
-    "timeout": "Provider timeout",
-}
-
-
-def transient_problem(exc: BaseException) -> str | None:
-    """A short label if the error is temporary (rate limit, overload, timeout), else None.
-
-    Graphiti wraps provider errors, so the whole cause chain is checked.
-    """
-    seen: BaseException | None = exc
-    while seen is not None:
-        if isinstance(seen, RateLimitError):
-            return "Rate limit reached"
-        text = str(seen).lower()
-        for marker, label in _TRANSIENT_MARKERS.items():
-            if marker in text:
-                return label
-        seen = seen.__cause__ or seen.__context__
-    return None
-
-
 def make_graphiti(settings: Settings | None = None) -> Graphiti:
-    """A Graphiti client for the configured LLM provider (Gemini or OpenAI)."""
+    """A Graphiti client for the configured provider, with LLM calls paced to its rate limits."""
     settings = settings or get_settings()
+    graphiti = _make_graphiti(settings)
+    llm_pacer = RequestPacer(settings.llm_requests_per_minute)  # shared: same quota
+    retries, wait = settings.rate_limit_retries, settings.rate_limit_wait_seconds
+    pace(graphiti.llm_client, "generate_response", llm_pacer, retries, wait)
+    pace(graphiti.cross_encoder, "rank", llm_pacer, retries, wait)
+    embed_pacer = RequestPacer(0)  # embeddings have separate, higher limits: retry only
+    for method in ("create", "create_batch"):
+        if hasattr(graphiti.embedder, method):
+            pace(graphiti.embedder, method, embed_pacer, retries, wait)
+    return graphiti
+
+
+def _make_graphiti(settings: Settings) -> Graphiti:
     api_key = settings.api_key
     if not api_key:
         raise MissingApiKeyError(f"{settings.api_key_name} is not set. Add it to the .env file.")

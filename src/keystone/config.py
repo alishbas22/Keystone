@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     embedding_model: str | None = None
     # Parallel LLM calls per section. Low values avoid free-tier rate limits; raise on paid plans.
     llm_max_concurrency: int = Field(default=2, ge=1, le=50)
+    # LLM calls per minute, evenly spaced (0 = unlimited). Gemini's free tier allows about 15.
+    llm_requests_per_minute: float = Field(default=10, ge=0)
     # When the provider says "rate limit exceeded": retries per section, with growing waits.
     rate_limit_retries: int = Field(default=5, ge=0, le=10)
     rate_limit_wait_seconds: float = Field(default=30, ge=0)
