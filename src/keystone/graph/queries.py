@@ -124,7 +124,7 @@ def fact_view(fact: Fact, provenance: dict[str, Provenance], scope: list[str]) -
     )
 
 
-async def _scoped_edges(
+async def scoped_edges(
     graph: KeystoneGraph, where: str, scope: list[str], **params: Any
 ) -> list[EntityEdge]:
     rows = await graph.query(
@@ -138,7 +138,9 @@ async def _scoped_edges(
     return await EntityEdge.get_by_uuids(graph.graphiti.driver, uuids) if uuids else []
 
 
-async def _facts(graph: KeystoneGraph, edges: list[EntityEdge], scope: list[str]) -> list[FactView]:
+async def fact_views(
+    graph: KeystoneGraph, edges: list[EntityEdge], scope: list[str]
+) -> list[FactView]:
     facts, provenance = await build_facts(graph, edges)
     labelled = classify(facts, graph.ontology.rules, await load_decisions(graph))
     return [fact_view(f, provenance, scope) for f in labelled]
@@ -205,10 +207,10 @@ async def get_entity(graph: KeystoneGraph, uuid: str, scope: list[str]) -> Entit
     props = dict(row["props"])  # type: ignore[call-overload]
     entity_type = _entity_type([str(x) for x in row["labels"]], set(graph.ontology.entity_types))  # type: ignore[attr-defined]
     cluster = [str(u) for u in row["cluster"]]  # type: ignore[attr-defined]
-    edges = await _scoped_edges(
+    edges = await scoped_edges(
         graph, "a.uuid IN $cluster OR b.uuid IN $cluster", scope, cluster=cluster
     )
-    facts = await _facts(graph, edges, scope)
+    facts = await fact_views(graph, edges, scope)
     known_type = graph.ontology.entity_types.get(entity_type)
     allowed = set(known_type.properties) if known_type else set()  # ontology properties only
     return EntityProfile(
@@ -260,7 +262,7 @@ async def find_path(
         return []
     order = [str(u) for u in rows[0]["edges"]]  # type: ignore[attr-defined]
     edges = await EntityEdge.get_by_uuids(graph.graphiti.driver, order)
-    facts = {f.id: f for f in await _facts(graph, edges, scope)}
+    facts = {f.id: f for f in await fact_views(graph, edges, scope)}
     return [facts[u] for u in order if u in facts]
 
 
@@ -291,16 +293,16 @@ def _conflict_view(
 
 async def explain_claim(graph: KeystoneGraph, fact_id: str, scope: list[str]) -> FactView | None:
     """A fact with every (visible) source: document, section, author, date, confidence."""
-    edges = await _scoped_edges(graph, "e.uuid = $fact_id", scope, fact_id=fact_id)
+    edges = await scoped_edges(graph, "e.uuid = $fact_id", scope, fact_id=fact_id)
     if not edges:
         return None
     # Classify with the fact's contradicting neighbours so its status is correct.
     edge = edges[0]
-    related = await _scoped_edges(
+    related = await scoped_edges(
         graph,
         "a.uuid IN $ends OR b.uuid IN $ends",
         scope,
         ends=[edge.source_node_uuid, edge.target_node_uuid],
     )
-    views = await _facts(graph, related or edges, scope)
+    views = await fact_views(graph, related or edges, scope)
     return next((v for v in views if v.id == fact_id), None)
