@@ -5,7 +5,7 @@ field becomes an attribute to extract. These models are generated from the YAML 
 ontology has a single source of truth.
 
 Usage:
-    schema = to_graphiti(core_ontology())
+    schema = to_graphiti(active_ontology())
     await graphiti.add_episode(..., **schema.add_episode_kwargs())
 """
 

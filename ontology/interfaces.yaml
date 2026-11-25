@@ -15,6 +15,12 @@ interfaces:
       organisation.
     properties: {}
 
+  Locatable:
+    description: >-
+      Something that has a physical location: an organisation, team, event, place, or a
+      pack type such as a store.
+    properties: {}
+
   Transactable:
     description: >-
       Something with a monetary value that is exchanged between parties, such as an order

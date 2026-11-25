@@ -153,9 +153,18 @@ class RelationRules(_Strict):
 # --- The whole ontology -----------------------------------------------------------------------
 
 
+class PackInfo(_Strict):
+    """Header of an industry pack file."""
+
+    name: str
+    version: str
+    description: str = Field(min_length=1)
+
+
 class Ontology(_Strict):
     name: str
     version: str
+    packs: list[PackInfo] = []
     standards: dict[str, Standard] = {}
     business_functions: list[str] = Field(min_length=1)
     interfaces: dict[str, Interface] = {}

@@ -63,7 +63,7 @@ entity_types:
       as our own company, a customer company, a supplier or a bank. For teams and departments
       inside an organisation use OrganizationalUnit.
     maps_to: schema:Organization
-    implements: [Party]
+    implements: [Party, Locatable]
     see_also: [org:Organization, prov:Organization]
     properties:
       legal_name: {type: string, maps_to: schema:legalName, description: 'Official registered name.'}
@@ -76,6 +76,7 @@ entity_types:
       A team, department, division or business unit that is part of an organisation, such as
       "Sales team", "Finance department" or "EMEA division". It cannot exist on its own.
     maps_to: org:OrganizationalUnit
+    implements: [Locatable]
     properties: {}
 
   Product:
@@ -114,8 +115,9 @@ entity_types:
 
   Place:
     description: >-
-      A physical location such as an office, store, warehouse, city or country.
+      A physical location such as an office, warehouse, city or country.
     maps_to: schema:Place
+    implements: [Locatable]
     properties:
       address: {type: text, maps_to: schema:address, description: 'Street address.'}
       country: {type: string, maps_to: schema:addressCountry, description: 'Country name or ISO code.'}
@@ -125,6 +127,7 @@ entity_types:
       Something that happens at a specific time, such as a meeting, conference, product launch
       or review.
     maps_to: schema:Event
+    implements: [Locatable]
     properties:
       start_date: {type: datetime, maps_to: schema:startDate, description: 'When the event starts.'}
       end_date: {type: datetime, maps_to: schema:endDate, description: 'When the event ends.'}
@@ -250,8 +253,8 @@ relation_types:
 
   # --- Places, events, documents ---
   located_in:
-    description: An organisation, team, event or place is located in a place.
-    source: [Organization, OrganizationalUnit, Event, Place]
+    description: Something with a physical location (an organisation, team, event, place or store) is located in a place.
+    source: [Locatable]
     target: [Place]
     maps_to: schema:location
 

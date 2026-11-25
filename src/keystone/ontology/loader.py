@@ -60,28 +60,61 @@ def merge(base: dict[str, Any], extra: dict[str, Any], origin: str) -> dict[str,
                     raise OntologyMergeError(f"{origin}: unknown rule list '{list_name}'")
                 rules[list_name] = [*rules.get(list_name, []), *(items or [])]
             merged["rules"] = rules
-        elif key in merged:
+        elif key == "pack":
+            merged["packs"] = [*merged.get("packs", []), value]
+        elif key in merged or key == "packs":
             raise OntologyMergeError(f"{origin}: '{key}' can only be set once (in core.yaml)")
         else:
             merged[key] = value
     return merged
 
 
-def load_raw(directory: Path | None = None, extensions: Iterable[Path] = ()) -> dict[str, Any]:
+def available_packs(directory: Path | None = None) -> list[str]:
+    """Names of the industry packs in ontology/packs/ (e.g. ['retail'])."""
+    return sorted(p.stem for p in ((directory or ontology_dir()) / "packs").glob("*.yaml"))
+
+
+def pack_path(name: str, directory: Path | None = None) -> Path:
+    path = (directory or ontology_dir()) / "packs" / f"{name}.yaml"
+    if not path.exists():
+        raise OntologyMergeError(
+            f"Unknown industry pack '{name}'. Available: {available_packs(directory)}"
+        )
+    return path
+
+
+def load_raw(
+    directory: Path | None = None, extensions: Iterable[Path] = (), packs: Iterable[str] = ()
+) -> dict[str, Any]:
     """The merged ontology as plain data (before validation)."""
     directory = directory or ontology_dir()
+    files = [
+        *(directory / name for name in CORE_FILES),
+        *(pack_path(name, directory) for name in packs),
+        *extensions,
+    ]
     data: dict[str, Any] = {}
-    for path in [*(directory / name for name in CORE_FILES), *extensions]:
+    for path in files:
         data = merge(data, _read_yaml(path), path.name)
     return data
 
 
-def load_ontology(directory: Path | None = None, extensions: Iterable[Path] = ()) -> Ontology:
-    """Read, merge and validate the ontology."""
-    return Ontology.model_validate(load_raw(directory, extensions))
+def load_ontology(
+    directory: Path | None = None, extensions: Iterable[Path] = (), packs: Iterable[str] = ()
+) -> Ontology:
+    """Read, merge and validate the ontology (core files, then packs, then extra files)."""
+    return Ontology.model_validate(load_raw(directory, extensions, packs))
 
 
 @lru_cache
 def core_ontology() -> Ontology:
-    """The core ontology (core + interfaces + rules), loaded once and cached."""
+    """The core ontology only (core + interfaces + rules), loaded once and cached."""
     return load_ontology()
+
+
+@lru_cache
+def active_ontology() -> Ontology:
+    """The ontology Keystone runs with: core + the packs listed in the ONTOLOGY_PACKS setting."""
+    from keystone.config import get_settings
+
+    return load_ontology(packs=get_settings().ontology_packs)

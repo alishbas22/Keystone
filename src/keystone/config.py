@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     llm_model: str | None = None  # None = Graphiti's default model
     embedding_model: str | None = None
 
+    # Industry packs loaded on top of the core ontology (files in ontology/packs/).
+    # In .env: ONTOLOGY_PACKS=["retail"]
+    ontology_packs: list[str] = ["retail"]
+
     # Graph partition the demo writes into (Graphiti "group_id").
     graph_group: str = "keystone-demo"
 

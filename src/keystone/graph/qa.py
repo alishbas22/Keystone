@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from keystone.config import get_settings
 from keystone.graph.engine import SourceRef
 from keystone.graph.truth import Fact, classify
-from keystone.ontology import core_ontology
+from keystone.ontology import active_ontology
 
 SYSTEM_PROMPT = """\
 You answer questions about a company using ONLY the numbered facts provided.
@@ -102,7 +102,7 @@ async def answer_question(graphiti: Graphiti, question: str, num_results: int = 
     group = get_settings().graph_group
     edges = await graphiti.search(question, group_ids=[group], num_results=num_results)
     names, sources = await _load_context(graphiti, edges)
-    facts = classify([_to_fact(e, names, sources) for e in edges], core_ontology().rules)
+    facts = classify([_to_fact(e, names, sources) for e in edges], active_ontology().rules)
     if not facts:
         return Answer(question, "I could not find anything about that in the graph.", [], [], {})
 

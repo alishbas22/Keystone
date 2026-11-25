@@ -21,7 +21,7 @@ from graphiti_core.utils.maintenance.graph_data_operations import clear_data
 
 from keystone.config import Settings, get_settings
 from keystone.ingest.parse import ParsedDocument
-from keystone.ontology import core_ontology, to_graphiti
+from keystone.ontology import active_ontology, to_graphiti
 
 
 class MissingApiKeyError(RuntimeError):
@@ -104,7 +104,7 @@ async def ingest_document(
     Skips the document if a file with the same content was already ingested.
     """
     settings = settings or get_settings()
-    ontology = core_ontology()
+    ontology = active_ontology()
     if business_function not in ontology.business_functions:
         raise ValueError(f"business_function must be one of {ontology.business_functions}")
     if await is_ingested(graphiti, doc.doc_id, settings.graph_group):

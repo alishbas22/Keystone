@@ -1,6 +1,6 @@
 """Load the ontology YAML (core, interfaces, rules, packs) and convert it to Graphiti types."""
 
-from keystone.ontology.loader import core_ontology, load_ontology
+from keystone.ontology.loader import active_ontology, available_packs, core_ontology, load_ontology
 from keystone.ontology.models import (
     EntityType,
     Interface,
@@ -21,6 +21,8 @@ __all__ = [
     "RelationRules",
     "RelationType",
     "Triple",
+    "active_ontology",
+    "available_packs",
     "core_ontology",
     "load_ontology",
     "to_graphiti",

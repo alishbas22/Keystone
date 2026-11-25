@@ -34,7 +34,7 @@ from keystone.ingest.parse import (  # noqa: E402
     date_from_filename,
     parse_file,
 )
-from keystone.ontology import core_ontology  # noqa: E402
+from keystone.ontology import active_ontology  # noqa: E402
 
 SAMPLE_DIR = Path(__file__).resolve().parents[1] / "demo" / "data"
 # Which business function owns each sample document.
@@ -55,7 +55,7 @@ EXAMPLE_QUESTION = "Who is our biggest customer and who manages their account?"
 
 T = TypeVar("T")
 settings = get_settings()
-functions = core_ontology().business_functions
+functions = active_ontology().business_functions
 
 st.set_page_config(page_title="Keystone demo", page_icon="🗝️", layout="wide")
 

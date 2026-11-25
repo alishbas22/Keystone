@@ -1,0 +1,145 @@
+# Retail industry pack (KAN-17)
+#
+# Extends the core ontology with retail concepts. It only ADDS types, relations and rules;
+# the loader rejects any attempt to redefine something from the core.
+#
+# Modelling notes:
+#   - SKU: every SKU is a core `Product` with a unique `sku` code (Schema.org pattern).
+#     This pack adds `ProductLine` to group SKUs that are variants of one product family,
+#     e.g. "Oak Standing Desk" -> 120 cm and 140 cm SKUs (schema:ProductGroup).
+#   - Supplier: being a supplier is a RELATIONSHIP (supplier_of, supplies), like customer_of,
+#     so a company that is both a customer and a supplier is one Organization.
+#   - Stock levels change over time, so they live on the `stocked_at` relation, whose
+#     validity window keeps the history.
+
+pack:
+  name: retail
+  version: 0.1.0
+  description: Stores, product lines, shipments, suppliers and customer segments.
+
+entity_types:
+  Store:
+    description: >-
+      A physical shop or retail outlet where customers buy products, such as "Brightline
+      Manchester Store". Not the company that owns it and not a warehouse.
+    maps_to: schema:Store
+    implements: [Locatable]
+    properties:
+      store_code: {type: string, maps_to: schema:branchCode, identity: true, description: 'Internal store or branch code, e.g. "MAN-01".'}
+      opening_date: {type: date, description: 'Date the store opened.'}
+
+  ProductLine:
+    description: >-
+      A family of products sold under one name that come in variants (sizes, colours), such
+      as "Oak Standing Desk" with 120 cm and 140 cm versions. Each variant is a Product
+      with its own SKU.
+    maps_to: schema:ProductGroup
+    properties:
+      line_code: {type: string, maps_to: schema:productGroupID, identity: true, description: 'Product line or model code.'}
+
+  Shipment:
+    description: >-
+      A delivery of goods from one place to another, such as a parcel or a pallet sent to a
+      customer or a store, usually with a tracking number.
+    maps_to: schema:ParcelDelivery
+    properties:
+      tracking_number: {type: string, maps_to: schema:trackingNumber, identity: true, description: 'Carrier tracking number.'}
+      expected_arrival: {type: date, maps_to: schema:expectedArrivalUntil, description: 'Expected delivery date.'}
+
+  CustomerSegment:
+    description: >-
+      A named group of customers with something in common, used for marketing or pricing,
+      such as "Hospitality chains" or "Small offices".
+    maps_to: schema:Audience
+    properties:
+      criteria: {type: text, maps_to: schema:audienceType, description: 'What customers in this segment have in common.'}
+
+relation_types:
+  # --- Suppliers (relationships, not a type) ---
+  supplier_of:
+    description: A person or organisation supplies goods or services to an organisation.
+    source: [Party]
+    target: [Organization]
+
+  supplies:
+    description: A person or organisation supplies a product or product line.
+    source: [Party]
+    target: [Product, ProductLine]
+
+  # --- Products ---
+  variant_of:
+    description: A product (one SKU) is a variant of a product line, e.g. a size or colour.
+    source: [Product]
+    target: [ProductLine]
+    maps_to: schema:isVariantOf
+
+  stocked_at:
+    description: A product is held in stock at a store.
+    source: [Product]
+    target: [Store]
+    properties:
+      quantity: {type: number, description: 'Units in stock.'}
+
+  # --- Stores ---
+  operated_by:
+    description: A store is owned or operated by an organisation.
+    source: [Store]
+    target: [Organization]
+    maps_to: schema:parentOrganization
+
+  # --- Shipments ---
+  shipment_for:
+    description: A shipment delivers (part of) an order.
+    source: [Shipment]
+    target: [Order]
+    maps_to: schema:partOfOrder
+
+  ships_product:
+    description: A shipment contains a product.
+    source: [Shipment]
+    target: [Product]
+    maps_to: schema:itemShipped
+    properties:
+      quantity: {type: number, description: 'Units shipped.'}
+
+  shipped_from:
+    description: A shipment leaves from a place or store.
+    source: [Shipment]
+    target: [Place, Store]
+    maps_to: schema:originAddress
+
+  delivered_to:
+    description: A shipment is delivered to a place or store.
+    source: [Shipment]
+    target: [Place, Store]
+    maps_to: schema:deliveryAddress
+
+  carried_by:
+    description: A shipment is transported by a carrier or logistics company.
+    source: [Shipment]
+    target: [Organization]
+    maps_to: schema:provider
+
+  # --- Customer segments ---
+  in_segment:
+    description: A customer belongs to a customer segment.
+    source: [Party]
+    target: [CustomerSegment]
+
+rules:
+  single_valued:
+    - relation: variant_of
+      per: source
+      description: A SKU belongs to one product line.
+    - relation: operated_by
+      per: source
+      description: A store is operated by one organisation at a time.
+    - relation: shipment_for
+      per: source
+      description: A shipment belongs to one order.
+    - relation: carried_by
+      per: source
+      description: A shipment has one carrier.
+    - relation: delivered_to
+      per: source
+      description: A shipment has one delivery destination.
