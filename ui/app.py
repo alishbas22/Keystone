@@ -90,7 +90,8 @@ def ingest(items: list[tuple[Path, str, datetime]]) -> None:
             def progress(i: int, total: int, heading: str, bar=bar) -> None:  # noqa: B008
                 bar.progress((i - 1) / total, text=f"Extracting section {i}/{total}: {heading}")
 
-            stored = await ingest_document(graph, doc, function, observed, progress, settings)
+            when = doc.written_at or observed  # e.g. an email's own sent date wins
+            stored = await ingest_document(graph, doc, function, when, progress, settings)
             bar.progress(1.0, text="Done" if stored else "Already in the graph, skipped")
 
     try:

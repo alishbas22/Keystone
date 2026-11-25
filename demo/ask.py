@@ -34,7 +34,7 @@ async def load() -> None:
         for path in sorted(p for p in DATA.iterdir() if p.suffix in SUPPORTED_SUFFIXES):
             doc = parse_file(path)
             function = next((f for k, f in FUNCTIONS.items() if k in path.name), "Sales")
-            when = date_from_filename(path.name) or datetime.now(UTC)
+            when = doc.written_at or date_from_filename(path.name) or datetime.now(UTC)
             print(f"{path.name}: {len(doc.sections)} sections ({function}, {when.date()})")
 
             def progress(i: int, total: int, heading: str) -> None:

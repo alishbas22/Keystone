@@ -1,34 +1,54 @@
-"""Document parsing with Docling (KAN-19, minimal).
+"""Document parsing with Docling (KAN-19).
 
-Docling turns PDF, Word, Excel, PowerPoint, Markdown and HTML into a structured document.
-We split it into sections (by heading, capped in size) and keep each section's heading and
-page numbers for provenance. Plain .txt files are read directly.
+Docling turns PDF, Word, Excel, PowerPoint, email, Markdown, text, HTML and CSV into a
+structured document. We split it into sections (by heading, capped in size) and keep each
+section's heading and page numbers for provenance. For emails, the sender and sent date are
+read from the headers so the facts are dated by when the email was written.
+
+Two entry points:
+    parse_file(path)          a file on disk
+    parse_document(document)  a connector Document (bytes or text), parsed in memory
 """
 
 import hashlib
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from email import policy
+from email.parser import BytesParser
+from email.utils import getaddresses, parsedate_to_datetime
 from functools import lru_cache
+from io import BytesIO
 from pathlib import Path
 
-from docling.datamodel.base_models import InputFormat
+from docling.datamodel.base_models import DocumentStream, InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling_core.transforms.chunker.hierarchical_chunker import HierarchicalChunker
 
-DOCLING_SUFFIXES = {
+from keystone.connectors.base import Document
+
+# File extension -> Docling format (MVP scope from CLAUDE.md, plus HTML and CSV).
+FORMATS = {
     ".pdf": InputFormat.PDF,
     ".docx": InputFormat.DOCX,
     ".xlsx": InputFormat.XLSX,
     ".pptx": InputFormat.PPTX,
+    ".eml": InputFormat.EMAIL,
+    ".msg": InputFormat.EMAIL,
     ".md": InputFormat.MD,
+    ".txt": InputFormat.MD,
     ".html": InputFormat.HTML,
     ".htm": InputFormat.HTML,
+    ".csv": InputFormat.CSV,
 }
-SUPPORTED_SUFFIXES = sorted([*DOCLING_SUFFIXES, ".txt"])
+SUPPORTED_SUFFIXES = sorted(FORMATS)
 MAX_SECTION_CHARS = 3000
 _DATE_PREFIX = re.compile(r"^(\d{4}-\d{2}-\d{2})")
+
+
+class ParseError(ValueError):
+    """A file could not be read. The message is safe to show to users."""
 
 
 @dataclass(frozen=True)
@@ -42,8 +62,10 @@ class Section:
 class ParsedDocument:
     file_name: str
     title: str
-    doc_id: str  # content hash: the same file uploaded twice gets the same id
+    doc_id: str  # content hash: the same content always gets the same id
     sections: list[Section]
+    author: str | None = None  # e.g. the email sender
+    written_at: datetime | None = None  # e.g. the email's sent date
 
 
 def date_from_filename(name: str) -> datetime | None:
@@ -61,9 +83,9 @@ def _title_from_filename(name: str) -> str:
 
 @lru_cache
 def _converter() -> DocumentConverter:
-    pdf_options = PdfPipelineOptions(do_ocr=False, do_table_structure=True)
+    pdf_options = PdfPipelineOptions(do_ocr=False, do_table_structure=True)  # OCR: not in MVP
     return DocumentConverter(
-        allowed_formats=list(set(DOCLING_SUFFIXES.values())),
+        allowed_formats=list(set(FORMATS.values())),
         format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_options)},
     )
 
@@ -75,11 +97,17 @@ def _page_label(pages: set[int]) -> str:
     return f"p. {low}" if low == high else f"p. {low}-{high}"
 
 
-def _docling_sections(path: Path, default_heading: str) -> tuple[str, list[Section]]:
-    document = _converter().convert(path).document
+def _docling_sections(
+    file_name: str, data: bytes, default_heading: str
+) -> tuple[str, list[Section]]:
+    try:
+        result = _converter().convert(DocumentStream(name=file_name, stream=BytesIO(data)))
+    except Exception as exc:
+        raise ParseError(f"Could not read {file_name}: {type(exc).__name__}: {exc}") from exc
+
     groups: list[tuple[str, list[str], set[int]]] = []
     title = ""
-    for chunk in HierarchicalChunker().chunk(document):
+    for chunk in HierarchicalChunker().chunk(result.document):
         headings = list(getattr(chunk.meta, "headings", None) or [])
         if headings and not title:
             title = headings[0]
@@ -98,22 +126,72 @@ def _docling_sections(path: Path, default_heading: str) -> tuple[str, list[Secti
             last[2].update(pages)
         else:
             groups.append((heading, [text], set(pages)))
-    sections = [Section(h, "\n".join(texts), _page_label(p)) for h, texts, p in groups]
-    return title, sections
+    return title, [Section(h, "\n".join(texts), _page_label(p)) for h, texts, p in groups]
+
+
+def _email_headers(data: bytes) -> tuple[str | None, datetime | None, str | None]:
+    """(sender, sent date, subject) from a .eml file's headers."""
+    message = BytesParser(policy=policy.default).parsebytes(data, headersonly=True)
+    senders = getaddresses([str(message.get("From", ""))])
+    sender = next((name or address for name, address in senders if name or address), None)
+    sent: datetime | None = None
+    if message.get("Date"):
+        try:
+            sent = parsedate_to_datetime(str(message["Date"]))
+        except (TypeError, ValueError):
+            sent = None
+    if sent is not None and sent.tzinfo is None:
+        sent = sent.replace(tzinfo=UTC)
+    subject = str(message.get("Subject", "")) or None
+    return sender, sent, subject
+
+
+def parse_bytes(file_name: str, data: bytes) -> ParsedDocument:
+    """Parse file content held in memory. The extension of `file_name` selects the reader."""
+    suffix = Path(file_name).suffix.lower()
+    if suffix not in FORMATS:
+        raise ParseError(f"Unsupported file type '{suffix}'. Supported: {SUPPORTED_SUFFIXES}")
+    if not data.strip():
+        raise ParseError(f"{file_name} is empty")
+
+    fallback_title = _title_from_filename(file_name)
+    title, sections = _docling_sections(file_name, data, fallback_title)
+    if not sections:
+        raise ParseError(f"No text found in {file_name}")
+
+    author = written_at = None
+    if suffix == ".eml":
+        author, written_at, subject = _email_headers(data)
+        title = subject or title
+    return ParsedDocument(
+        file_name=file_name,
+        title=title or fallback_title,
+        doc_id=hashlib.sha256(data).hexdigest()[:16],
+        sections=sections,
+        author=author,
+        written_at=written_at,
+    )
 
 
 def parse_file(path: Path) -> ParsedDocument:
-    suffix = path.suffix.lower()
-    if suffix not in SUPPORTED_SUFFIXES:
-        raise ValueError(f"Unsupported file type '{suffix}'. Supported: {SUPPORTED_SUFFIXES}")
-    data = path.read_bytes()
-    doc_id = hashlib.sha256(data).hexdigest()[:16]
-    fallback_title = _title_from_filename(path.name)
+    return parse_bytes(path.name, path.read_bytes())
 
-    if suffix == ".txt":
-        title, sections = "", [Section(fallback_title, data.decode("utf-8", "replace"), "")]
+
+def parse_document(document: Document) -> ParsedDocument:
+    """Parse a connector Document. Text content is read as Markdown (headings become sections)."""
+    if document.content is not None:
+        assert document.file_name is not None  # guaranteed by Document validation
+        parsed = parse_bytes(document.file_name, document.content)
     else:
-        title, sections = _docling_sections(path, fallback_title)
-    if not sections:
-        raise ValueError(f"No text found in {path.name}")
-    return ParsedDocument(path.name, title or fallback_title, doc_id, sections)
+        name = document.file_name or f"{document.id}.md"
+        if Path(name).suffix.lower() not in FORMATS:
+            name = f"{name}.md"
+        parsed = parse_bytes(name, (document.text or "").encode("utf-8"))
+    return ParsedDocument(
+        file_name=parsed.file_name,
+        title=document.title or parsed.title,
+        doc_id=document.content_hash,
+        sections=parsed.sections,
+        author=parsed.author or document.author,
+        written_at=parsed.written_at or document.modified_at,
+    )
