@@ -1,0 +1,10 @@
+{
+  "connector_name": "my-crm",
+  "display_name": "My CRM",
+  "description": "Customers and contacts from My CRM.",
+  "author": "Your Name",
+  "business_function": ["Sales", "Finance", "HR", "Operations"],
+  "project_slug": "keystone-{{ cookiecutter.connector_name }}",
+  "package_name": "keystone_{{ cookiecutter.connector_name|replace('-', '_') }}",
+  "class_name": "{{ cookiecutter.display_name|replace(' ', '')|replace('-', '') }}Connector"
+}

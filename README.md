@@ -58,6 +58,12 @@ uv run python demo/ask.py --load "Who manages Harbor Hotels Group?"
 
 To regenerate the sample files: `uv run python demo/make_sample_docs.py`.
 
+### Connecting data sources
+
+Built-in connectors: `folder` (documents) and `sql` (PostgreSQL and other databases). To add
+your own system, see the [connector guide](docs/connectors.md); a template generates a working
+connector project in one command.
+
 ### Local development
 
 ```bash

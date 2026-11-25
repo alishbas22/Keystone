@@ -1,0 +1,17 @@
+[
+  {
+    "id": "c-1",
+    "kind": "customers",
+    "title": "Harbor Hotels Group",
+    "text": "Harbor Hotels Group is a customer. Sara Khan is the account manager.",
+    "author": "{{ cookiecutter.display_name }} sync",
+    "updated_at": "2026-03-10T09:00:00+00:00"
+  },
+  {
+    "id": "n-1",
+    "kind": "notes",
+    "title": "Call with Harbor Hotels",
+    "text": "Daniel Price from Harbor Hotels Group asked for 50 more Oak Standing Desks.",
+    "updated_at": "2026-04-02T14:30:00+00:00"
+  }
+]
