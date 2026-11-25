@@ -10,7 +10,7 @@ Run:
 
 import dataclasses
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 from typing import Any
@@ -22,6 +22,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from keystone import __version__
 from keystone.graph import claims, queries
 from keystone.graph.engine import KeystoneGraph, open_graph
+from keystone.mcp_server import audit
 from keystone.mcp_server.auth import (
     AccessDenied,
     AgentIdentity,
@@ -32,6 +33,7 @@ from keystone.mcp_server.auth import (
 from keystone.ontology import Ontology
 
 AGENT_KEY_ENV = "KEYSTONE_AGENT_KEY"
+NOT_VISIBLE = "not found or not visible to this agent"
 
 
 async def _stdio_agent(registry: AgentRegistry) -> AgentIdentity:
@@ -169,12 +171,36 @@ def create_server(
         auth=auth,
     )
 
-    def ready() -> tuple[KeystoneGraph, AgentIdentity]:
+    async def run(
+        tool: str,
+        arguments: dict[str, Any],
+        action: Callable[[KeystoneGraph, AgentIdentity], Awaitable[dict[str, Any]]],
+    ) -> dict[str, Any]:
+        """Resolve the calling agent, run the tool and write an audit entry (KAN-30)."""
         assert state.graph is not None, "graph not open"
+        graph = state.graph
         try:
-            return state.graph, current_agent(state.graph.ontology, state.agent)
+            agent = current_agent(graph.ontology, state.agent)
         except AccessDenied as exc:
+            denied = audit.AuditEntry(
+                audit.now(), "unknown", tool, arguments, [], "denied", [], str(exc)
+            )
+            await audit.record(graph, denied)
             raise ToolError(f"Access denied: {exc}") from exc  # shown to the agent
+        try:
+            result = await action(graph, agent)
+        except Exception as exc:
+            failed = audit.AuditEntry(
+                audit.now(), agent.name, tool, arguments, agent.scope, "error", [], repr(exc)
+            )
+            await audit.record(graph, failed)
+            raise
+        done = audit.AuditEntry(
+            audit.now(), agent.name, tool, arguments, agent.scope, "ok",
+            audit.returned_ids(result), str(result.get("error", "")),
+        )  # fmt: skip
+        await audit.record(graph, done)
+        return result
 
     @server.tool()
     async def search_entities(query: str, limit: int = 10) -> dict[str, Any]:
@@ -182,52 +208,71 @@ def create_server(
 
         Returns uuids to use with get_entity, get_relationships and find_path.
         """
-        graph, agent = ready()
-        found = await queries.search_entities(graph, query, agent.scope, max(1, min(limit, 50)))
-        return {"results": to_json(found)}
+
+        async def action(graph: KeystoneGraph, agent: AgentIdentity) -> dict[str, Any]:
+            found = await queries.search_entities(graph, query, agent.scope, max(1, min(limit, 50)))
+            return {"results": to_json(found)}
+
+        return await run("search_entities", {"query": query, "limit": limit}, action)
 
     @server.tool()
     async def get_entity(uuid: str) -> dict[str, Any]:
         """Full profile of an entity: type, properties, aliases, current facts and past facts
         (history, superseded or disputed), each with its sources."""
-        graph, agent = ready()
-        profile = await queries.get_entity(graph, uuid, agent.scope)
-        return to_json(profile) if profile else {"error": "not found or not visible to this agent"}
+
+        async def action(graph: KeystoneGraph, agent: AgentIdentity) -> dict[str, Any]:
+            profile = await queries.get_entity(graph, uuid, agent.scope)
+            return to_json(profile) if profile else {"error": NOT_VISIBLE}
+
+        return await run("get_entity", {"uuid": uuid}, action)
 
     @server.tool()
     async def get_relationships(uuid: str, relation: str | None = None) -> dict[str, Any]:
         """Every fact connecting an entity to others, optionally only one relation type
         (e.g. "manages_account"). Includes status and sources."""
-        graph, agent = ready()
-        facts = await queries.get_relationships(graph, uuid, agent.scope, relation)
-        return {"facts": to_json(facts)}
+
+        async def action(graph: KeystoneGraph, agent: AgentIdentity) -> dict[str, Any]:
+            facts = await queries.get_relationships(graph, uuid, agent.scope, relation)
+            return {"facts": to_json(facts)}
+
+        return await run("get_relationships", {"uuid": uuid, "relation": relation}, action)
 
     @server.tool()
     async def find_path(from_uuid: str, to_uuid: str, max_hops: int = 4) -> dict[str, Any]:
         """The shortest chain of facts linking two entities (up to max_hops, at most 6)."""
-        graph, agent = ready()
-        path = await queries.find_path(graph, from_uuid, to_uuid, agent.scope, max_hops)
-        return {"path": to_json(path), "found": bool(path)}
+
+        async def action(graph: KeystoneGraph, agent: AgentIdentity) -> dict[str, Any]:
+            path = await queries.find_path(graph, from_uuid, to_uuid, agent.scope, max_hops)
+            return {"path": to_json(path), "found": bool(path)}
+
+        arguments = {"from_uuid": from_uuid, "to_uuid": to_uuid, "max_hops": max_hops}
+        return await run("find_path", arguments, action)
 
     @server.tool()
     async def get_conflicts(only_open: bool = False) -> dict[str, Any]:
         """Contradictions between facts (e.g. two different account managers for one customer),
         with the rule that resolved each one: person, time, source authority, corroboration,
         or none (still disputed)."""
-        graph, agent = ready()
-        conflicts = await queries.get_conflicts(graph, agent.scope, include_resolved=not only_open)
-        return {
-            "conflicts": [{**to_json(c), "open": c.open} for c in conflicts],
-            "open": sum(1 for c in conflicts if c.open),
-        }
+
+        async def action(graph: KeystoneGraph, agent: AgentIdentity) -> dict[str, Any]:
+            found = await queries.get_conflicts(graph, agent.scope, include_resolved=not only_open)
+            return {
+                "conflicts": [{**to_json(c), "open": c.open} for c in found],
+                "open": sum(1 for c in found if c.open),
+            }
+
+        return await run("get_conflicts", {"only_open": only_open}, action)
 
     @server.tool()
     async def explain_claim(fact_id: str) -> dict[str, Any]:
         """Where a fact came from: source documents, sections, pages, authors, dates,
         confidence, plus its status and any contradicting facts. Use it to cite answers."""
-        graph, agent = ready()
-        fact = await queries.explain_claim(graph, fact_id, agent.scope)
-        return to_json(fact) if fact else {"error": "not found or not visible to this agent"}
+
+        async def action(graph: KeystoneGraph, agent: AgentIdentity) -> dict[str, Any]:
+            fact = await queries.explain_claim(graph, fact_id, agent.scope)
+            return to_json(fact) if fact else {"error": NOT_VISIBLE}
+
+        return await run("explain_claim", {"fact_id": fact_id}, action)
 
     @server.tool()
     async def add_claim(
@@ -242,27 +287,31 @@ def create_server(
         describe_ontology); `details` is optional context. The claim is attributed to you,
         dated now, and visible to other agents with access to the business function (default:
         your first one). Returns the stored facts and any existing facts they contradict."""
-        graph, agent = ready()
-        try:
-            result = await claims.add_claim(
-                graph,
-                agent.name,
-                agent.scope,
-                subject,
-                relation,
-                object,
-                details,
-                business_function,
-            )
-        except claims.ClaimRejected as exc:
-            return {"stored": False, "error": str(exc)}
-        return {"stored": True, **to_json(result)}
+
+        async def action(graph: KeystoneGraph, agent: AgentIdentity) -> dict[str, Any]:
+            try:
+                result = await claims.add_claim(
+                    graph, agent.name, agent.scope, subject, relation, object, details,
+                    business_function,
+                )  # fmt: skip
+            except claims.ClaimRejected as exc:
+                return {"stored": False, "error": str(exc)}
+            return {"stored": True, **to_json(result)}
+
+        arguments = {
+            "subject": subject, "relation": relation, "object": object, "details": details,
+            "business_function": business_function,
+        }  # fmt: skip
+        return await run("add_claim", arguments, action)
 
     @server.tool()
     async def describe_ontology() -> dict[str, Any]:
         """The business concepts (entity types, relations, interfaces) and contradiction rules,
         plus which business functions this agent can see. Call this first to plan queries."""
-        graph, agent = ready()
-        return {**describe(graph.ontology), "your_access": to_json(agent)}
+
+        async def action(graph: KeystoneGraph, agent: AgentIdentity) -> dict[str, Any]:
+            return {**describe(graph.ontology), "your_access": to_json(agent)}
+
+        return await run("describe_ontology", {}, action)
 
     return server
