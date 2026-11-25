@@ -76,14 +76,18 @@ for i, conflict in enumerate(conflicts):
             key=f"a-{i}",
             disabled=conflict.winner == a.id and conflict.decided_by == "person",
         ):
-            run_with_graph(lambda g, w=a.id, lo=b.id: record_decision(g, w, lo, by=f"person:{who}"))
+            run_with_graph(
+                lambda g, w=a.id, lo=b.id, by=f"person:{who}": record_decision(g, w, lo, by=by)
+            )
             st.rerun()
         if k2.button(
             "Keep B",
             key=f"b-{i}",
             disabled=conflict.winner == b.id and conflict.decided_by == "person",
         ):
-            run_with_graph(lambda g, w=b.id, lo=a.id: record_decision(g, w, lo, by=f"person:{who}"))
+            run_with_graph(
+                lambda g, w=b.id, lo=a.id, by=f"person:{who}": record_decision(g, w, lo, by=by)
+            )
             st.rerun()
         if conflict.decided_by == "person" and k3.button("Undo (use rules)", key=f"u-{i}"):
             run_with_graph(lambda g, x=a.id, y=b.id: clear_decision(g, x, y))
