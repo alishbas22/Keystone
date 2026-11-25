@@ -148,7 +148,7 @@ def test_gemini_is_the_default_provider() -> None:
     assert type(graphiti.embedder).__name__ == "GeminiEmbedder"
     assert type(graphiti.cross_encoder).__name__ == "GeminiRerankerClient"
     # Keystone's tested model defaults, not Graphiti's retired ones
-    assert graphiti.llm_client.model == "gemini-3.5-flash"
+    assert graphiti.llm_client.model == "gemini-3.5-flash-lite"  # free tier friendly
     assert graphiti.llm_client.small_model == "gemini-3.5-flash-lite"
     assert graphiti.embedder.config.embedding_model == "gemini-embedding-001"  # type: ignore[attr-defined]
 

@@ -31,9 +31,11 @@ class MissingApiKeyError(RuntimeError):
 
 # Tested with a new Gemini API key (Nov 2026). Graphiti's built-in Gemini defaults
 # (gemini-3-flash-preview, gemini-2.5-flash-lite, text-embedding-001) are not available to new
-# keys, so Keystone sets its own. Override with LLM_MODEL, LLM_SMALL_MODEL, EMBEDDING_MODEL.
+# keys, so Keystone sets its own. The free tier allows only 20 requests/day for
+# gemini-3.5-flash (ingestion needs ~10-15 per section), so the default is flash-lite.
+# With billing enabled, set LLM_MODEL=gemini-3.5-flash for better extraction.
 GEMINI_DEFAULTS = {
-    "model": "gemini-3.5-flash",
+    "model": "gemini-3.5-flash-lite",
     "small_model": "gemini-3.5-flash-lite",
     "embedding_model": "gemini-embedding-001",
 }
