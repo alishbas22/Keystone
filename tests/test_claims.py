@@ -75,6 +75,15 @@ async def test_contradictions_are_reported(world: Any) -> None:
     assert [f.id for f in result.contradicts] == [data.facts["bilal_manages"]]
 
 
+async def test_repeating_a_claim_is_not_corroboration(world: Any) -> None:
+    graph, _, stored = world
+    for _ in range(2):
+        await add_claim(graph, "sales-bot", ["Sales"], "Bilal Ahmed", "knows", "Sara Khan")
+    await add_claim(graph, "other-bot", ["Sales"], "Bilal Ahmed", "knows", "Sara Khan")
+    ids = [p.doc_id for p in stored]
+    assert ids[0] == ids[1] != ids[2]  # one source per agent, however often it repeats itself
+
+
 async def test_another_agent_reads_what_was_written(world: Any) -> None:
     """Shared memory: Agent A writes, Agent B (same function) reads it, with attribution."""
     graph, data, _ = world

@@ -6,14 +6,12 @@ query the same server and each sees only its own business function's data.
 
 import asyncio
 import json
-import socket
 import sys
 from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
 import pytest_asyncio
-import uvicorn
 from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
 from mcp.shared._httpx_utils import create_mcp_http_client
@@ -27,6 +25,7 @@ from keystone.mcp_server.auth import (
 )
 from keystone.mcp_server.server import create_server
 from tests.graph_fixtures import Brightline, build_brightline
+from tests.http_support import mcp_http_server
 from tests.neo4j_support import open_test_graph
 
 
@@ -129,12 +128,6 @@ async def test_agents_see_only_their_business_functions(world: Any) -> None:
 # --- End to end over HTTP with bearer keys ------------------------------------------------------
 
 
-def free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return int(s.getsockname()[1])
-
-
 @pytest.mark.parametrize(
     "mode",
     [
@@ -156,27 +149,16 @@ async def test_http_bearer_keys_end_to_end(world: Any, mode: str) -> None:
     _, sales_key = await registry.create("sales-bot", ["Sales"])
     _, finance_key = await registry.create("finance-bot", ["Finance"])
 
-    port = free_port()
-    url = f"http://127.0.0.1:{port}"
-    app = create_server(graph, http_url=url).streamable_http_app()
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
-    task = asyncio.create_task(server.serve())
-    while not server.started:
-        await asyncio.sleep(0.05)
+    async with mcp_http_server(graph) as url:
 
-    async def search_as(key: str, query: str) -> list[str]:
-        http = create_mcp_http_client(headers={"Authorization": f"Bearer {key}"})
-        transport = streamable_http_client(f"{url}/mcp", http_client=http)
-        async with Client(transport, mode=mode) as client:
-            found = result_json(await client.call_tool("search_entities", {"query": query}))
-            return [r["name"] for r in found["results"]]
+        async def search_as(key: str, query: str) -> list[str]:
+            http = create_mcp_http_client(headers={"Authorization": f"Bearer {key}"})
+            async with Client(streamable_http_client(url, http_client=http), mode=mode) as client:
+                found = result_json(await client.call_tool("search_entities", {"query": query}))
+                return [r["name"] for r in found["results"]]
 
-    try:
         assert await search_as(sales_key, "harbor") == ["Harbor Hotels Group"]
         assert await search_as(sales_key, "INV") == []
         assert await search_as(finance_key, "INV") == ["INV-2025-031"]
         with pytest.raises(Exception):  # noqa: B017  # unknown key: the HTTP layer refuses (401)
-            await search_as("ks_not-a-real-key", "harbor")
-    finally:
-        server.should_exit = True
-        await task
+            await asyncio.wait_for(search_as("ks_not-a-real-key", "harbor"), timeout=30)

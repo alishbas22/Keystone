@@ -108,6 +108,12 @@ class AgentRegistry:
     async def set_functions(self, name: str, functions: list[str]) -> None:
         await self._update(name, functions=self._check_functions(functions))
 
+    async def rotate_key(self, name: str) -> str:
+        """Issue a new key (e.g. the old one was lost). The old key stops working at once."""
+        key = KEY_PREFIX + secrets.token_urlsafe(32)
+        await self._update(name, key_hash=hash_key(key), key_hint=key[:7], active=True)
+        return key
+
     async def revoke(self, name: str) -> None:
         """The key stops working immediately. The agent's past writes stay attributed to it."""
         await self._update(name, active=False)

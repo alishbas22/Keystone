@@ -59,8 +59,10 @@ async def add_claim(
         )
     body = claim_text(graph, subject.strip(), relation, obj.strip(), details)
     when = observed_at or datetime.now(UTC)
+    # Same agent + same claim = same id: repeating a claim is not independent corroboration.
+    claim_key = f"{agent_name}|{subject.strip().lower()}|{relation}|{obj.strip().lower()}"
     provenance = Provenance(
-        doc_id=hashlib.sha256(f"{agent_name}|{when.isoformat()}|{body}".encode()).hexdigest()[:16],
+        doc_id=hashlib.sha256(claim_key.encode()).hexdigest()[:16],
         document_id=f"claim/{when.isoformat()}",
         source=f"agent:{agent_name}",
         title=f"Claim by {agent_name}",
