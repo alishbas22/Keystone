@@ -74,6 +74,7 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["E501"]  # test data tables read better one row per line
 "demo/make_sample_docs.py" = ["E501"]  # sample document text
+"eval/*" = ["E501"]  # report table templates
 
 [tool.mypy]
 python_version = "3.12"

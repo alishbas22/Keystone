@@ -1,0 +1,184 @@
+{
+  "at": "2026-11-26T04:45:42+00:00",
+  "documents_evaluated": [
+    "2025-01-15_company_overview.pdf",
+    "2025-03-10_harbor_hotels_account_plan.docx",
+    "2025-04-02_harbor_feedback.eml",
+    "2025-06-30_q2_customer_report.xlsx",
+    "2025-09-02_q3_finance_review.pptx",
+    "2026-02-14_crestview_parent_a.eml",
+    "2026-02-14_crestview_parent_b.eml",
+    "2026-03-02_shipment_update.eml",
+    "2026-03-02_shipping_agreement_dhl.pdf",
+    "2026-04-10_greenleaf_handover_a.eml",
+    "2026-04-10_greenleaf_handover_b.eml",
+    "2026-04-10_greenleaf_note.eml",
+    "2026-05-20_harbor_complaint.eml",
+    "2026-09-15_account_reassignment_memo.docx"
+  ],
+  "extraction": {
+    "recall": 0.8484848484848485,
+    "precision": 0.7272727272727273,
+    "found": 28,
+    "expected": 33,
+    "correct_extracted": 8,
+    "extracted_in_complete_docs": 11,
+    "missing": [
+      [
+        "2025-06-30_q2_customer_report.xlsx",
+        [
+          "Bilal Ahmed",
+          "manages_account",
+          "Crestview Bank"
+        ]
+      ],
+      [
+        "2025-06-30_q2_customer_report.xlsx",
+        [
+          "Bilal Ahmed",
+          "manages_account",
+          "Greenleaf Clinics"
+        ]
+      ],
+      [
+        "2025-04-02_harbor_feedback.eml",
+        [
+          "Harbor Hotels Group",
+          "likes",
+          "Ergo Desk Chair"
+        ]
+      ],
+      [
+        "2025-04-02_harbor_feedback.eml",
+        [
+          "Daniel Price",
+          "works_for",
+          "Harbor Hotels Group"
+        ]
+      ],
+      [
+        "2026-04-10_greenleaf_handover_a.eml",
+        [
+          "Bilal Ahmed",
+          "manages_account",
+          "Greenleaf Clinics"
+        ]
+      ]
+    ],
+    "unexpected": [
+      [
+        "2025-04-02_harbor_feedback.eml",
+        [
+          "Daniel Price",
+          "likes",
+          "Ergo Desk Chair"
+        ]
+      ],
+      [
+        "2026-04-10_greenleaf_handover_a.eml",
+        [
+          "Greenleaf Clinics",
+          "relates_to",
+          "Bilal Ahmed"
+        ]
+      ],
+      [
+        "2026-02-14_crestview_parent_b.eml",
+        [
+          "Usman Tariq",
+          "works_for",
+          "Brightline Furnishings Ltd"
+        ]
+      ]
+    ]
+  },
+  "resolution": {
+    "accuracy": 1.0,
+    "checked": 4,
+    "failures": []
+  },
+  "conflicts": [
+    {
+      "id": "harbor-account-manager",
+      "evaluated": true,
+      "detected": true,
+      "expected_rule": "time",
+      "rule": "time",
+      "expected_current": "Bilal Ahmed",
+      "current": "Bilal Ahmed",
+      "note": "",
+      "correct": true
+    },
+    {
+      "id": "harbor-chair-sentiment",
+      "evaluated": true,
+      "detected": false,
+      "expected_rule": "time",
+      "rule": null,
+      "expected_current": "dislikes",
+      "current": null,
+      "note": "",
+      "correct": false
+    },
+    {
+      "id": "shipment-carrier",
+      "evaluated": true,
+      "detected": true,
+      "expected_rule": "source authority",
+      "rule": "source authority",
+      "expected_current": "DHL Freight",
+      "current": "DHL Freight",
+      "note": "",
+      "correct": true
+    },
+    {
+      "id": "greenleaf-account-manager",
+      "evaluated": true,
+      "detected": true,
+      "expected_rule": "corroboration",
+      "rule": "undecided",
+      "expected_current": "Bilal Ahmed",
+      "current": null,
+      "note": "",
+      "correct": false
+    },
+    {
+      "id": "crestview-parent",
+      "evaluated": true,
+      "detected": true,
+      "expected_rule": "undecided",
+      "rule": "undecided",
+      "expected_current": null,
+      "current": null,
+      "note": "",
+      "correct": true
+    }
+  ],
+  "scope_leaks": [],
+  "latency_seconds": {
+    "search_entities": 0.002761700001428835,
+    "get_conflicts": 0.07541309999942314,
+    "get_entity": 0.04998760001035407
+  },
+  "answers": [
+    {
+      "question": "Who is our biggest customer and who manages their account?",
+      "answer": "Harbor Hotels Group is our biggest customer [4]. Bilal Ahmed is the account manager for Harbor Hotels Group and manages the account effective 1 September 2026 [7]. Previously, Sara Khan was the account manager [8].",
+      "grounded": true,
+      "mentions_expected": true
+    },
+    {
+      "question": "Who reports to Omar Siddiqui?",
+      "answer": "Bilal Ahmed [1] and Sara Khan [2] report to Omar Siddiqui.",
+      "grounded": true,
+      "mentions_expected": true
+    },
+    {
+      "question": "Which invoice was issued for order PO-1042?",
+      "answer": "Invoice INV-2025-031 was issued for order PO-1042 [1].",
+      "grounded": true,
+      "mentions_expected": true
+    }
+  ],
+  "onboarding_seconds": 0.07096779999847058
+}
