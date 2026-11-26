@@ -9,7 +9,7 @@ from graphiti_core.llm_client.errors import RateLimitError
 
 from keystone.config import Settings
 from keystone.graph.engine import make_graphiti
-from keystone.graph.pacing import RequestPacer, pace
+from keystone.graph.pacing import RequestPacer, pace, transient_problem
 
 
 async def test_pacer_spaces_calls_evenly() -> None:
@@ -48,6 +48,20 @@ async def test_single_calls_are_retried_on_rate_limits() -> None:
     pace(client, "generate_response", RequestPacer(0), retries=3, base_wait=0)
     assert await client.generate_response("q") == "answer to q"
     assert client.calls == 3
+
+
+def test_network_drops_are_temporary() -> None:
+    class ConnectError(Exception):  # same name as httpx's
+        pass
+
+    try:
+        try:
+            raise ConnectError("[Errno 11001] getaddrinfo failed")
+        except ConnectError as inner:
+            raise Exception() from inner  # how Graphiti wraps it
+    except Exception as outer:
+        assert transient_problem(outer) == "Network problem"
+    assert transient_problem(OSError("[Errno 11001] getaddrinfo failed")) == "Network problem"
 
 
 async def test_other_errors_are_not_retried() -> None:

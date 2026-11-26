@@ -23,6 +23,19 @@ _TRANSIENT_MARKERS = {
     "overloaded": "Provider busy",
     "timed out": "Provider timeout",
     "timeout": "Provider timeout",
+    "getaddrinfo": "Network problem",  # DNS lookup failed: connection dropped
+    "connection reset": "Network problem",
+    "connection aborted": "Network problem",
+    "connection refused": "Network problem",
+}
+# Error classes (from httpx/httpcore and the standard library) that mean a network hiccup.
+_TRANSIENT_TYPES = {
+    "ConnectError": "Network problem",
+    "ConnectTimeout": "Provider timeout",
+    "ReadTimeout": "Provider timeout",
+    "RemoteProtocolError": "Network problem",
+    "ConnectionResetError": "Network problem",
+    "ConnectionAbortedError": "Network problem",
 }
 
 
@@ -35,6 +48,8 @@ def transient_problem(exc: BaseException) -> str | None:
     while seen is not None:
         if isinstance(seen, RateLimitError):
             return "Rate limit reached"
+        if type(seen).__name__ in _TRANSIENT_TYPES:
+            return _TRANSIENT_TYPES[type(seen).__name__]
         text = str(seen).lower()
         for marker, label in _TRANSIENT_MARKERS.items():
             if marker in text:
