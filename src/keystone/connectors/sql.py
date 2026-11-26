@@ -16,7 +16,7 @@ Propose a mapping for review:
 
 import argparse
 from collections.abc import Iterator, Sequence
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from functools import cached_property
 from pathlib import Path
@@ -205,7 +205,7 @@ class SqlConnector(BaseConnector[SqlConfig]):
                 source=self.source_name,
                 title=f"{info.name} {keys[0]}-{keys[-1]}",
                 text=heading + "\n\n" + "\n\n".join(records),
-                modified_at=max(modified) if modified else None,
+                modified_at=_aware(max(modified)) if modified else None,
                 business_function=tm.business_function or self.config.business_function,
                 metadata={
                     "table": info.name,
@@ -314,6 +314,15 @@ def _relation_line(
     source: tuple[str, str | None], relation: str, target: tuple[str, str | None]
 ) -> str:
     return f"- {source[0]} ({source[1]}) {relation.upper()} {target[0]} ({target[1]})"
+
+
+def _aware(value: Any) -> datetime | None:
+    """Database timestamps without a timezone (e.g. SQLite) are taken as UTC."""
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
+    if isinstance(value, date):
+        return datetime(value.year, value.month, value.day, tzinfo=UTC)
+    return None
 
 
 def _fmt(value: Any) -> str:

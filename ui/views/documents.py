@@ -14,12 +14,13 @@ from keystone.ingest.pipeline import IngestResult, ingest_document, reingest, sa
 from keystone.ontology import active_ontology
 
 SAMPLE_DIR = Path(__file__).resolve().parents[2] / "demo" / "data"
-SAMPLE_FUNCTIONS = {
-    "company_overview": "HR",
-    "account_plan": "Sales",
-    "customer_report": "Sales",
-    "finance_review": "Finance",
-    "reassignment_memo": "Sales",
+# The small demo: company overview + the account manager contradiction.
+CORE_SAMPLES = {
+    "2025-01-15_company_overview.pdf",
+    "2025-03-10_harbor_hotels_account_plan.docx",
+    "2025-06-30_q2_customer_report.xlsx",
+    "2025-09-02_q3_finance_review.pptx",
+    "2026-09-15_account_reassignment_memo.docx",
 }
 
 st.title("📄 Documents")
@@ -39,7 +40,7 @@ def show_results(results: list[IngestResult]) -> None:
         st.write(f"{icons.get(r.status, '•')} **{r.title}**: {r.status} ({detail})")
 
 
-def ingest(items: list[tuple[Document, str]]) -> None:
+def ingest(items: list[tuple[Document, str | None]]) -> None:
     status = st.status(
         "Reading and extracting facts… (the free Gemini tier is slow)", expanded=True
     )
@@ -110,30 +111,25 @@ with upload_tab:
 
 with sample_tab:
     st.write(
-        "Five documents from *Brightline Furnishings Ltd* (PDF, Word, Excel, PowerPoint) with a "
-        "planted contradiction: the 2025 account plan and the 2026 memo name different account "
-        "managers for Harbor Hotels Group."
+        "30 documents from *Brightline Furnishings Ltd* (PDF, Word, Excel, PowerPoint, email, "
+        "Markdown, CSV) filed in Sales, Finance, HR and Operations folders, with five planted "
+        "contradictions (see `demo/ground_truth.yaml`)."
     )
     samples = list(FolderConnector({"path": SAMPLE_DIR}, "samples").read())
+    which = st.radio(
+        "Load",
+        [f"Core demo ({len(CORE_SAMPLES)} documents, the account manager contradiction)",
+         f"All {len(samples)} documents (hours on the free Gemini tier)"],
+    )  # fmt: skip
+    chosen_samples = (
+        [d for d in samples if d.file_name in CORE_SAMPLES] if which.startswith("Core") else samples
+    )
     st.dataframe(
-        [
-            {
-                "file": d.file_name,
-                "business function": next(
-                    (f for k, f in SAMPLE_FUNCTIONS.items() if k in d.id), "Sales"
-                ),
-            }
-            for d in samples
-        ],
+        [{"file": d.id, "business function": d.business_function} for d in chosen_samples],
         hide_index=True,
     )
     if st.button("Load the sample company", disabled=not ready):
-        ingest(
-            [
-                (d, next((f for k, f in SAMPLE_FUNCTIONS.items() if k in d.id), "Sales"))
-                for d in samples
-            ]
-        )
+        ingest([(d, None) for d in chosen_samples])  # business function from the folder
 
 if st.session_state.get("last_results"):
     st.subheader("Last ingestion")

@@ -32,6 +32,11 @@ from keystone.ontology import active_ontology
 DATA = Path(__file__).resolve().parents[1] / "demo" / "data"
 
 
+def sample(name: str) -> Path:
+    """A sample document by file name (they are filed in business function folders)."""
+    return next(DATA.rglob(name))
+
+
 class FakeGraph:
     """Records what the pipeline would store, instead of calling Graphiti."""
 
@@ -59,7 +64,7 @@ def text_doc(**overrides: Any) -> Document:
 
 async def test_sections_are_stored_with_full_provenance() -> None:
     graph = FakeGraph()
-    memo = DATA / "2026-09-15_account_reassignment_memo.docx"
+    memo = sample("2026-09-15_account_reassignment_memo.docx")
     document = Document(
         id=memo.name,
         source="folder:samples",

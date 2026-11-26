@@ -1,0 +1,69 @@
+# Keystone SQL mapping for the demo sales database. Proposed automatically with
+#   python -m keystone.connectors.sql propose sqlite:///demo/sales/sales.db --owner "Brightline Furnishings Ltd"
+# and reviewed by a person: all tables, relations and business functions checked.
+reviewed: true
+owner_organization: Brightline Furnishings Ltd
+tables:
+  customers:
+    entity_type: Organization
+    name_column: name
+    properties:
+      vat_number: tax_id
+    foreign_keys:
+      account_manager_id:
+        relation: manages_account
+        reverse: true
+    row_relations:
+    - relation: customer_of
+      target: Brightline Furnishings Ltd
+    business_function: Sales
+  departments:
+    entity_type: OrganizationalUnit
+    name_column: name
+    business_function: HR
+  employees:
+    entity_type: Person
+    name_column: full_name
+    properties:
+      email: email
+    foreign_keys:
+      manager_id:
+        relation: reports_to
+      department_id:
+        relation: member_of
+    business_function: HR
+  invoices:
+    entity_type: Invoice
+    name_column: invoice_number
+    properties:
+      invoice_number: invoice_number
+    foreign_keys:
+      order_id:
+        relation: invoice_for
+    business_function: Finance
+  order_items:
+    kind: junction
+    junction:
+      source_column: order_id
+      target_column: product_id
+      relation: contains_product
+      properties:
+        quantity: quantity
+    business_function: Sales
+  orders:
+    entity_type: Order
+    name_column: order_number
+    properties:
+      order_number: order_number
+      order_date: order_date
+      total: total_amount
+    foreign_keys:
+      customer_id:
+        relation: placed_by
+    business_function: Sales
+  products:
+    entity_type: Product
+    name_column: name
+    properties:
+      sku: sku
+    business_function: Operations

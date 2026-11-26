@@ -29,5 +29,17 @@ services:
       neo4j:
         condition: service_healthy
 
+  sales-db: # demo sales database (KAN-35): docker compose --profile demo up -d sales-db
+    image: postgres:17
+    profiles: [demo]
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: sales
+      POSTGRES_PASSWORD: sales-demo-password
+      POSTGRES_DB: sales
+    volumes:
+      - ./demo/sales/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+
 volumes:
   neo4j_data:

@@ -1,0 +1,178 @@
+# Ground truth for the sample company (KAN-35), used by the evaluation (KAN-37).
+#
+# facts:           key facts each document must produce, as [subject, relation, object] with
+#                  ontology relations. Documents marked `complete: true` list ALL their facts, so
+#                  extraction precision can be measured on them.
+# contradictions:  the planted contradictions, the rule that must decide them and the expected
+#                  current claim (null = must stay disputed).
+# same_entity:     names that must resolve to one entity.
+# different:       names that must NOT be merged.
+# scope:           per business function, facts an agent with only that function must not see.
+# questions:       questions for the answer-grounding check, with words the answer must contain.
+
+facts:
+  2025-01-15_company_overview.pdf:
+    complete: false
+    facts:
+      - [Amina Yusuf, head_of, Brightline Furnishings Ltd]
+      - [Omar Siddiqui, head_of, Sales team]
+      - [Hina Raza, head_of, Finance department]
+      - [Sara Khan, reports_to, Omar Siddiqui]
+      - [Bilal Ahmed, reports_to, Omar Siddiqui]
+      - [Usman Tariq, reports_to, Hina Raza]
+      - [Sales team, unit_of, Brightline Furnishings Ltd]
+      - [Finance department, unit_of, Brightline Furnishings Ltd]
+      - [Brightline Furnishings Ltd, located_in, Manchester]
+  2025-03-10_harbor_hotels_account_plan.docx:
+    complete: false
+    facts:
+      - [Sara Khan, manages_account, Harbor Hotels Group]
+      - [Harbor Hotels Group, customer_of, Brightline Furnishings Ltd]
+      - [Daniel Price, works_for, Harbor Hotels Group]
+  2025-06-30_q2_customer_report.xlsx:
+    complete: false
+    facts:
+      - [Sara Khan, manages_account, Harbor Hotels Group]
+      - [Bilal Ahmed, manages_account, Crestview Bank]
+      - [Bilal Ahmed, manages_account, Greenleaf Clinics]
+  2025-09-02_q3_finance_review.pptx:
+    complete: false
+    facts:
+      - [INV-2025-031, billed_to, Harbor Hotels Group]
+      - [INV-2025-031, invoice_for, PO-1042]
+      - [PO-1042, placed_by, Harbor Hotels Group]
+      - [PO-1042, contains_product, Ergo Desk Chair]
+      - [PO-1042, contains_product, Oak Standing Desk]
+  2026-09-15_account_reassignment_memo.docx:
+    complete: false
+    facts:
+      - [Bilal Ahmed, manages_account, Harbor Hotels Group]
+      - [Sara Khan, head_of, Retail Partners team]
+  2025-04-02_harbor_feedback.eml:
+    complete: true
+    facts:
+      - [Harbor Hotels Group, likes, Ergo Desk Chair]
+      - [Daniel Price, works_for, Harbor Hotels Group]
+  2026-05-20_harbor_complaint.eml:
+    complete: true
+    facts:
+      - [Harbor Hotels Group, dislikes, Ergo Desk Chair]
+  2026-03-02_shipping_agreement_dhl.pdf:
+    complete: true
+    facts:
+      - [SHP-0077, carried_by, DHL Freight]
+      - [SHP-0077, shipment_for, PO-1042]
+  2026-03-02_shipment_update.eml:
+    complete: true
+    facts:
+      - [SHP-0077, carried_by, UPS]
+  2026-04-10_greenleaf_handover_a.eml:
+    complete: true
+    facts:
+      - [Bilal Ahmed, manages_account, Greenleaf Clinics]
+  2026-04-10_greenleaf_handover_b.eml:
+    complete: true
+    facts:
+      - [Bilal Ahmed, manages_account, Greenleaf Clinics]
+  2026-04-10_greenleaf_note.eml:
+    complete: true
+    facts:
+      - [Sara Khan, manages_account, Greenleaf Clinics]
+  2026-02-14_crestview_parent_a.eml:
+    complete: true
+    facts:
+      - [Crestview Bank, subsidiary_of, Northstar Holdings]
+  2026-02-14_crestview_parent_b.eml:
+    complete: true
+    facts:
+      - [Crestview Bank, subsidiary_of, Meridian Group]
+  2025-08-12_purchase_order_po_1042.docx:
+    complete: false
+    facts:
+      - [PO-1042, placed_by, Harbor Hotels Group]
+      - [PO-1042, sold_by, Brightline Furnishings Ltd]
+      - [PO-1042, contains_product, Ergo Desk Chair]
+  2025-11-20_hr_org_update.md:
+    complete: false
+    facts:
+      - [Leila Shah, member_of, Finance department]
+      - [Leila Shah, reports_to, Hina Raza]
+  2025-07-01_supplier_list.csv:
+    complete: false
+    facts:
+      - [Nordwood Timber, supplies, Oak Standing Desk]
+      - [Ergonomix, supplies, Ergo Desk Chair]
+  2025-10-03_store_openings.pptx:
+    complete: false
+    facts:
+      - [Brightline Manchester Store, located_in, Manchester]
+      - [Brightline Manchester Store, operated_by, Brightline Furnishings Ltd]
+  2026-08-01_greenleaf_supply_contract.pdf:
+    complete: false
+    facts:
+      - [Greenleaf Clinics, customer_of, Brightline Furnishings Ltd]
+  2025-12-05_customer_segments.md:
+    complete: false
+    facts:
+      - [Harbor Hotels Group, in_segment, Hospitality chains]
+      - [Greenleaf Clinics, in_segment, Healthcare]
+
+contradictions:
+  - id: harbor-account-manager
+    rule: time
+    relation: manages_account
+    claims:
+      - {subject: Sara Khan, object: Harbor Hotels Group, document: 2025-03-10_harbor_hotels_account_plan.docx}
+      - {subject: Bilal Ahmed, object: Harbor Hotels Group, document: 2026-09-15_account_reassignment_memo.docx}
+    expected_current: Bilal Ahmed
+  - id: harbor-chair-sentiment
+    rule: time
+    claims:
+      - {subject: Harbor Hotels Group, relation: likes, object: Ergo Desk Chair, document: 2025-04-02_harbor_feedback.eml}
+      - {subject: Harbor Hotels Group, relation: dislikes, object: Ergo Desk Chair, document: 2026-05-20_harbor_complaint.eml}
+    expected_current: dislikes
+  - id: shipment-carrier
+    rule: source authority
+    relation: carried_by
+    claims:
+      - {subject: SHP-0077, object: DHL Freight, document: 2026-03-02_shipping_agreement_dhl.pdf}
+      - {subject: SHP-0077, object: UPS, document: 2026-03-02_shipment_update.eml}
+    expected_current: DHL Freight
+  - id: greenleaf-account-manager
+    rule: corroboration
+    relation: manages_account
+    claims:
+      - {subject: Bilal Ahmed, object: Greenleaf Clinics, document: 2026-04-10_greenleaf_handover_a.eml}
+      - {subject: Bilal Ahmed, object: Greenleaf Clinics, document: 2026-04-10_greenleaf_handover_b.eml}
+      - {subject: Sara Khan, object: Greenleaf Clinics, document: 2026-04-10_greenleaf_note.eml}
+    expected_current: Bilal Ahmed
+  - id: crestview-parent
+    rule: undecided
+    relation: subsidiary_of
+    claims:
+      - {subject: Crestview Bank, object: Northstar Holdings, document: 2026-02-14_crestview_parent_a.eml}
+      - {subject: Crestview Bank, object: Meridian Group, document: 2026-02-14_crestview_parent_b.eml}
+    expected_current: null
+
+same_entity:
+  - [Brightline Furnishings Ltd, Brightline Furnishings]
+  - [Oak Standing Desk 140 cm, BF-DK-220]
+
+different:
+  - [Sara Khan, Bilal Ahmed]
+  - [Harbor Hotels Group, Greenleaf Clinics]
+  - [Northstar Holdings, Meridian Group]
+
+scope:
+  Finance:
+    must_not_see: [[Sara Khan, manages_account, Harbor Hotels Group], [Sara Khan, reports_to, Omar Siddiqui]]
+  Sales:
+    must_not_see: [[Usman Tariq, reports_to, Hina Raza], [Crestview Bank, subsidiary_of, Northstar Holdings]]
+
+questions:
+  - question: Who is our biggest customer and who manages their account?
+    must_mention: [Harbor Hotels Group, Bilal Ahmed]
+  - question: Who reports to Omar Siddiqui?
+    must_mention: [Sara Khan, Bilal Ahmed]
+  - question: Which invoice was issued for order PO-1042?
+    must_mention: [INV-2025-031]

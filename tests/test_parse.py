@@ -19,37 +19,42 @@ from keystone.ingest.parse import (
 DATA = Path(__file__).resolve().parents[1] / "demo" / "data"
 
 
+def sample(name: str) -> Path:
+    """A sample document by file name (they are filed in business function folders)."""
+    return next(DATA.rglob(name))
+
+
 def test_date_from_filename() -> None:
     assert date_from_filename("2025-03-10_account_plan.docx") == datetime(2025, 3, 10, tzinfo=UTC)
     assert date_from_filename("account_plan.docx") is None
 
 
 def test_word_sections_keep_headings() -> None:
-    doc = parse_file(DATA / "2025-03-10_harbor_hotels_account_plan.docx")
+    doc = parse_file(sample("2025-03-10_harbor_hotels_account_plan.docx"))
     assert doc.title == "Account Plan: Harbor Hotels Group"
     sections = {s.heading: s.text for s in doc.sections}
     assert "Sara Khan is the account manager" in sections["Account team"]
 
 
 def test_excel_rows_become_readable_facts() -> None:
-    doc = parse_file(DATA / "2025-06-30_q2_customer_report.xlsx")
+    doc = parse_file(sample("2025-06-30_q2_customer_report.xlsx"))
     text = " ".join(s.text for s in doc.sections)
     assert "Harbor Hotels Group, Account manager = Sara Khan" in text
 
 
 def test_powerpoint_slides_are_pages() -> None:
-    doc = parse_file(DATA / "2025-09-02_q3_finance_review.pptx")
+    doc = parse_file(sample("2025-09-02_q3_finance_review.pptx"))
     pages = {s.heading: s.pages for s in doc.sections}
     assert pages["Invoices"] == "p. 2"
 
 
 def test_planted_contradiction_is_in_the_memo() -> None:
-    doc = parse_file(DATA / "2026-09-15_account_reassignment_memo.docx")
+    doc = parse_file(sample("2026-09-15_account_reassignment_memo.docx"))
     assert any("Bilal Ahmed is the account manager" in s.text for s in doc.sections)
 
 
 def test_same_content_same_id(tmp_path: Path) -> None:
-    source = DATA / "2026-09-15_account_reassignment_memo.docx"
+    source = sample("2026-09-15_account_reassignment_memo.docx")
     copy = tmp_path / "renamed.docx"
     copy.write_bytes(source.read_bytes())
     assert parse_file(copy).doc_id == parse_file(source).doc_id
@@ -104,7 +109,7 @@ def test_markdown_headings_become_sections() -> None:
 
 
 def test_connector_document_with_file_bytes() -> None:
-    source = DATA / "2026-09-15_account_reassignment_memo.docx"
+    source = sample("2026-09-15_account_reassignment_memo.docx")
     document = Document(
         id="drive/123",
         source="folder:test",
@@ -157,7 +162,7 @@ def test_corrupt_file_gives_a_readable_error() -> None:
 
 @pytest.mark.slow
 def test_pdf_with_page_numbers() -> None:
-    doc = parse_file(DATA / "2025-01-15_company_overview.pdf")
+    doc = parse_file(sample("2025-01-15_company_overview.pdf"))
     sections = {s.heading: s for s in doc.sections}
     assert "Omar Siddiqui is the Head of Sales" in sections["Leadership"].text
     assert sections["Leadership"].pages == "p. 1"
