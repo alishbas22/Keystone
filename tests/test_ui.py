@@ -86,6 +86,18 @@ def test_access_page_agents_audit_and_coverage(monkeypatch: pytest.MonkeyPatch) 
         assert any("**sales-bot**" in md.value for md in app.markdown)
 
 
+def test_google_sources_ask_to_sign_in_first(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pytest.TempPathFactory
+) -> None:
+    with seeded_ui(monkeypatch):
+        monkeypatch.chdir(tmp_path)  # no data/google/token.json here
+        app = run_page("access.py")
+        next(r for r in app.radio if r.label == "Source type").set_value("Gmail").run()
+        no_errors(app)
+        assert any("Not signed in to Google yet" in i.value for i in app.info)
+        assert any(b.label.startswith("Sign in with Google") for b in app.button)
+
+
 def test_home_page_loads(monkeypatch: pytest.MonkeyPatch) -> None:
     with seeded_ui(monkeypatch):
         app = run_page("home.py")

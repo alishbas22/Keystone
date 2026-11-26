@@ -6,6 +6,7 @@ import streamlit as st
 from common import require_setup, run_with_graph, settings
 
 from keystone.connectors import BaseConnector, create_connector
+from keystone.connectors.google import GoogleAuth, GoogleAuthRequired, login
 from keystone.connectors.sql import SqlConnector
 from keystone.connectors.sql_mapping import validate_mapping
 from keystone.graph.engine import KeystoneGraph
@@ -57,7 +58,9 @@ def sync(connector: BaseConnector, function: str | None) -> None:  # type: ignor
 
 with sources_tab:
     kind = st.radio(
-        "Source type", ["Folder", "Database (PostgreSQL, MySQL, SQLite…)"], horizontal=True
+        "Source type",
+        ["Folder", "Google Drive", "Gmail", "Database (PostgreSQL, MySQL, SQLite…)"],
+        horizontal=True,
     )
     if kind == "Folder":
         path = st.text_input("Folder path", placeholder=r"C:\Shared\Sales")
@@ -78,6 +81,53 @@ with sources_tab:
                 )
                 if st.button("Sync folder", type="primary"):
                     sync(folder, None)
+    elif kind in ("Google Drive", "Gmail"):
+        auth = GoogleAuth()
+        st.caption(
+            "Read-only access. First-time setup (Google Cloud OAuth client): see docs/google.md. "
+            f"Client file: `{auth.credentials_file}` · sign-in: `{auth.token_file}`"
+        )
+        if not auth.token_file.exists():
+            st.info("Not signed in to Google yet.")
+            if st.button("Sign in with Google (opens a browser on this computer)"):
+                try:
+                    st.success(f"Signed in. Token saved to {login(auth)}.")
+                    st.rerun()
+                except GoogleAuthRequired as exc:
+                    st.error(str(exc))
+        else:
+            default_function = st.selectbox(
+                "Business function (a folder or label named after a function overrides it)",
+                functions,
+            )
+            if kind == "Google Drive":
+                folder_id = st.text_input("Folder ID ('root' = My Drive)", "root")
+                google = create_connector(
+                    "google-drive",
+                    {"folder_id": folder_id, "business_function": default_function},
+                    "ui",
+                )
+            else:
+                query = st.text_input("Gmail search", "newer_than:90d")
+                limit = st.number_input("Maximum emails", 1, 5000, 200)
+                google = create_connector(
+                    "gmail",
+                    {
+                        "query": query,
+                        "max_messages": int(limit),
+                        "business_function": default_function,
+                    },
+                    "ui",
+                )
+            result = google.check()
+            (st.success if result.ok else st.error)(result.message)
+            if result.ok:
+                st.dataframe(
+                    [{"stream": s.name, "description": s.description} for s in google.discover()],
+                    hide_index=True,
+                )
+                if st.button(f"Sync {kind}", type="primary"):
+                    sync(google, None)
     else:
         url = st.text_input(
             "Database URL (used for this session only, never stored)",

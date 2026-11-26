@@ -102,6 +102,8 @@ A connector that fails to load is listed as `BROKEN` with the reason; it never s
 |---|---|
 | `folder` | Supported files in a folder tree. A subfolder named `Finance`, `Sales`, `HR` or `Operations` sets the business function. |
 | `sql` | PostgreSQL or any SQLAlchemy database. Proposes a table-to-ontology mapping you review (see below). |
+| `google-drive` | Google Drive files and Google Docs, Sheets and Slides (read-only). Setup: [google.md](google.md). |
+| `gmail` | Gmail messages and supported attachments (read-only). Setup: [google.md](google.md). |
 
 ### Mapping a database
 

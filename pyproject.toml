@@ -26,12 +26,18 @@ dependencies = [
     "psycopg[binary]>=3.2,<4",
     "rapidfuzz>=3.10,<4",
     "mcp>=2.3,<3",
+    "google-api-python-client>=2.150,<2.203",
+    "google-auth>=2.40,<2.63",
+    "google-auth-oauthlib>=1.2,<2",
+    "google-auth-httplib2>=0.2,<0.5",
 ]
 
 # Built-in connectors register the same way third-party connector packages do.
 [project.entry-points."keystone.connectors"]
 folder = "keystone.connectors.folder:FolderConnector"
 sql = "keystone.connectors.sql:SqlConnector"
+google-drive = "keystone.connectors.google.drive:DriveConnector"
+gmail = "keystone.connectors.google.gmail:GmailConnector"
 
 [dependency-groups]
 dev = [

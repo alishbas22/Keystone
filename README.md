@@ -23,8 +23,9 @@ A: Harbor Hotels Group is Brightline Furnishings' biggest customer [3]. Their ac
 
 ## What it does
 
-1. **Connects** documents (PDF, Word, Excel, PowerPoint, email, Markdown, HTML, CSV, text) and
-   databases (PostgreSQL and any SQLAlchemy database) through a small **connector SDK**.
+1. **Connects** documents (PDF, Word, Excel, PowerPoint, email, Markdown, HTML, CSV, text),
+   Gmail, Google Drive and databases (PostgreSQL and any SQLAlchemy database) through a small
+   **connector SDK**.
 2. **Maps** everything onto a **standard business ontology** built from Schema.org, W3C ORG and
    PROV-O, extended by **industry packs** (retail included).
 3. **Builds a temporal knowledge graph** with [Graphiti](https://github.com/getzep/graphiti) on
@@ -114,6 +115,8 @@ MCP client. Agent tools: `describe_ontology`, `search_entities`, `get_entity`,
 
 - **Documents:** upload on the *Documents* page, or connect a folder on *Sources & agents*.
   Subfolders named `Sales`, `Finance`, `HR` or `Operations` set the business function.
+- **Gmail and Google Drive:** read-only connectors; one-time Google setup in
+  [docs/google.md](docs/google.md), then connect on *Sources & agents*.
 - **Databases:** connect on *Sources & agents*, or propose a mapping from the command line,
   review it and sync:
   `uv run python -m keystone.connectors.sql propose "postgresql+psycopg://user:pw@host/db" --owner "Your Company" --out mapping.yaml`

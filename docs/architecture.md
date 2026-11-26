@@ -28,7 +28,7 @@ resolved by explicit rules; agents only see the business functions their key all
 | Package | Role |
 |---|---|
 | `ontology/` (YAML) + `keystone.ontology` | Core business ontology (Schema.org, W3C ORG, PROV-O), interfaces (Party, Locatable, Transactable), contradiction rules, industry packs (retail). Validated with Pydantic; every `maps_to` checked against the official vocabularies with rdflib. Converted to Graphiti's Pydantic types (`to_graphiti`). |
-| `keystone.connectors` | Connector SDK (Airbyte CDK pattern): `BaseConnector`, `Document`, `ConnectorManifest`, registry via Python entry points, contract checker, cookiecutter template. Built-ins: `folder`, `sql` (with NVIDIA auto-ontology style table mapping). |
+| `keystone.connectors` | Connector SDK (Airbyte CDK pattern): `BaseConnector`, `Document`, `ConnectorManifest`, registry via Python entry points, contract checker, cookiecutter template. Built-ins: `folder`, `sql` (with NVIDIA auto-ontology style table mapping), `google-drive` and `gmail` (read-only, OAuth or Workspace service account). |
 | `keystone.ingest` | Docling parsing (`parse.py`) and the pipeline (`pipeline.py`): Document → sections → Graphiti episodes with provenance. |
 | `keystone.graph` | Graphiti integration (`engine.py`), provenance (`provenance.py`), call pacing (`pacing.py`), entity resolution (`resolution.py`), truth engine (`truth.py`, `facts.py`), business function scopes (`scopes.py`), scoped queries (`queries.py`), agent claims (`claims.py`), question answering (`qa.py`). |
 | `keystone.mcp_server` | MCP server (`server.py`, MCP Python SDK v2 `MCPServer`), agent keys (`auth.py`), audit log (`audit.py`), CLI to manage agents (`agents.py`). |
