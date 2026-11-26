@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 from keystone.graph.provenance import Provenance
 from keystone.graph.truth import DecidedBy, Evidence, Fact, Status, classify, detect_conflicts
-from keystone.ontology import core_ontology
+from keystone.ontology import core_ontology, load_ontology
 
 RULES = core_ontology().rules
 
@@ -146,6 +146,33 @@ def test_ended_facts_are_history_and_the_change_is_recorded() -> None:
     result = {f.id: f for f in classify([old, new], RULES)}
     assert (result["a"].status, result["b"].status) == (Status.HISTORY, Status.CURRENT)
     assert result["b"].conflicts_with == ("a",)
+
+
+def test_same_day_graphiti_ending_does_not_beat_source_authority() -> None:
+    """Found by the evaluation: Graphiti ended the contract's fact because it read the email
+    later. For claims made the same day, Keystone's authority rule must still decide."""
+    contract = fact("dhl", "SHP-0077", "carried_by", "DHL Freight", (2026, 3, 2), [("c", "contract")],
+                    ended=datetime(2026, 3, 2, tzinfo=UTC))  # fmt: skip
+    email = fact("ups", "SHP-0077", "carried_by", "UPS", (2026, 3, 2), [("e", "email")])
+    rules = load_ontology(packs=["retail"]).rules  # carried_by is a retail relation
+    conflict = detect_conflicts([contract, email], rules)[0]
+    assert (conflict.decided_by, conflict.winner) == (DecidedBy.AUTHORITY, "dhl")
+    result = {f.id: f for f in classify([contract, email], rules)}
+    assert (result["dhl"].status, result["ups"].status) == (Status.CURRENT, Status.SUPERSEDED)
+    assert "Kept by the source authority rule" in result["dhl"].note
+
+
+def test_same_day_undecidable_conflict_is_disputed_even_if_graphiti_ended_one() -> None:
+    a = fact(
+        "a",
+        "Crestview Bank",
+        "subsidiary_of",
+        "Northstar",
+        (2026, 2, 14),
+        ended=datetime(2026, 2, 14, tzinfo=UTC),
+    )
+    b = fact("b", "Crestview Bank", "subsidiary_of", "Meridian", (2026, 2, 14))
+    assert statuses([a, b]) == {"a": Status.DISPUTED, "b": Status.DISPUTED}
 
 
 def test_unrelated_facts_stay_current() -> None:

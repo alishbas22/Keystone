@@ -19,6 +19,7 @@ from keystone.graph.engine import (
     transient_problem,
 )
 from keystone.graph.provenance import Provenance
+from keystone.ingest.parse import parse_document
 from keystone.ingest.pipeline import (
     ingest_document,
     observed_date,
@@ -134,6 +135,16 @@ def test_observed_date_priority() -> None:
     # A date in the file name beats the file's modification time (changed by copying).
     assert observed_date(doc, None) == datetime(2025, 3, 10, tzinfo=UTC)
     assert observed_date(text_doc(modified_at=modified), None) == modified
+
+
+def test_file_modification_time_never_beats_the_file_name_date(tmp_path: Path) -> None:
+    """Found by the evaluation: a PDF was dated by its modification time (when the file was
+    regenerated) instead of the date in its name, which broke the same-day authority rule."""
+    path = tmp_path / "2026-03-02_shipping_agreement.md"
+    path.write_text("# Agreement\n\nSHP-0077 is carried by DHL Freight.", encoding="utf-8")
+    [document] = list(FolderConnector({"path": tmp_path}).read())  # modified_at = now
+    parsed = parse_document(document)
+    assert observed_date(document, parsed.written_at) == datetime(2026, 3, 2, tzinfo=UTC)
 
 
 def test_source_kind_and_confidence() -> None:

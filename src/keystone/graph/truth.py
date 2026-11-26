@@ -129,9 +129,17 @@ def _resolve(
     if decision in (a.id, b.id):
         return decided(a if decision == a.id else b, DecidedBy.PERSON, "decided by a reviewer")
 
-    if bool(a.ended_at) != bool(b.ended_at):  # one already ended: a change, not a dispute
-        live = b if a.ended_at else a
-        return decided(live, DecidedBy.ENDED, "the older fact was ended by a later source")
+    if bool(a.ended_at) != bool(b.ended_at):  # Graphiti already ended one of them
+        ended, live = (a, b) if a.ended_at else (b, a)
+        same_moment = (
+            ended.observed_at is not None
+            and live.observed_at is not None
+            and abs(ended.observed_at - live.observed_at) <= same_time
+        )
+        if not same_moment:  # a real change over time
+            return decided(live, DecidedBy.ENDED, "the older fact was ended by a later source")
+        # Claims made at the same time: Graphiti's choice only reflects the order it read the
+        # documents in, so Keystone's rules (authority, corroboration) decide instead.
 
     if a.observed_at and b.observed_at and abs(a.observed_at - b.observed_at) > same_time:
         newer = a if a.observed_at > b.observed_at else b
@@ -177,11 +185,19 @@ def classify(
         if conflict.winner is None:
             for fact_id in (a.id, b.id):
                 fact = result[fact_id]
-                if fact.status is Status.CURRENT:
+                if fact.status in (Status.CURRENT, Status.HISTORY):
                     result[fact_id] = replace(
                         fact, status=Status.DISPUTED, note=f"Disputed: {conflict.reason}."
                     )
             continue
+        winner = result[conflict.winner]
+        if winner.status is Status.HISTORY:  # ended by Graphiti, but Keystone's rules keep it
+            result[winner.id] = replace(
+                winner,
+                status=Status.CURRENT,
+                note=f"Kept by the {conflict.decided_by} rule (Graphiti had ended it only "
+                "because it read the other source later).",
+            )
         loser = b.id if conflict.winner == a.id else a.id
         result[loser] = replace(
             result[loser],

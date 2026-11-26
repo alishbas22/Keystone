@@ -183,5 +183,7 @@ def parse_document(document: Document) -> ParsedDocument:
         doc_id=document.content_hash,
         sections=parsed.sections,
         author=parsed.author or document.author,
-        written_at=parsed.written_at or document.modified_at,
+        # Only a date the document itself states (e.g. an email's sent date). A file's
+        # modification time is NOT a writing date; ingestion uses it only as a last resort.
+        written_at=parsed.written_at,
     )

@@ -122,7 +122,7 @@ def test_connector_document_with_file_bytes() -> None:
     parsed = parse_document(document)
     assert parsed.doc_id == document.content_hash
     assert parsed.author == "Omar Siddiqui"
-    assert parsed.written_at == datetime(2026, 9, 15, tzinfo=UTC)
+    assert parsed.written_at is None  # a Word file states no date; modified_at is not one
     assert any("Bilal Ahmed" in s.text for s in parsed.sections)
 
 
